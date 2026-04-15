@@ -68,9 +68,9 @@ pub const RESET: &str = "\x1b[0m";
 // There is no way to turn off only one. Use RESET to safely end
 // sections where bold and dim might overlap.
 
-pub const LINK_COLOR: &str = "\x1b[36m";      // cyan
-pub const CODE_BG: &str = "\x1b[48;5;236m";   // dark gray background
-pub const CODE_FG: &str = "\x1b[38;5;213m";   // pink/magenta text
+pub const LINK_COLOR: &str = "\x1b[36m"; // cyan
+pub const CODE_BG: &str = "\x1b[48;5;236m"; // dark gray background
+pub const CODE_FG: &str = "\x1b[38;5;213m"; // pink/magenta text
 pub const QUOTE_BAR: &str = "\x1b[38;5;240m"; // gray
 pub const QUOTE_TEXT: &str = "\x1b[3;38;5;250m"; // italic light gray
 pub const URL_COLOR: &str = "\x1b[38;5;245m"; // subdued gray for link URLs
@@ -122,4 +122,25 @@ pub fn display_width(s: &str) -> usize {
         .chars()
         .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_ansi_removes_csi_osc_and_apc_sequences() {
+        let text = format!(
+            "a{BOLD_ON}b{RESET}\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\c\x1b_hidden\x1b\\d"
+        );
+
+        assert_eq!(strip_ansi(&text), "ablinkcd");
+    }
+
+    #[test]
+    fn display_width_ignores_ansi_and_counts_wide_chars() {
+        let text = format!("{BOLD_ON}好{RESET}a");
+
+        assert_eq!(display_width(&text), 3);
+    }
 }

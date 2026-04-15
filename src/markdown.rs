@@ -33,12 +33,7 @@ fn block_gap(out: &mut impl Write, first_block: &mut bool) {
 
 // ─── Line Output ────────────────────────────────────────────────────────────
 
-fn flush_line(
-    out: &mut impl Write,
-    line_buf: &mut String,
-    quote_depth: usize,
-    term_width: usize,
-) {
+fn flush_line(out: &mut impl Write, line_buf: &mut String, quote_depth: usize, term_width: usize) {
     if line_buf.is_empty() {
         return;
     }
@@ -174,8 +169,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                             let _ = writeln!(out, "{MARGIN}{}", render::kitty_display(&png));
                         }
                         None => {
-                            let _ =
-                                writeln!(out, "{MARGIN}{BOLD_ON}{heading_text}{RESET}");
+                            let _ = writeln!(out, "{MARGIN}{BOLD_ON}{heading_text}{RESET}");
                         }
                     }
                 } else {
@@ -245,7 +239,11 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 code_lines.clear();
             }
             Event::End(TagEnd::CodeBlock) => {
-                let max_w = code_lines.iter().map(|l| display_width(l)).max().unwrap_or(0);
+                let max_w = code_lines
+                    .iter()
+                    .map(|l| display_width(l))
+                    .max()
+                    .unwrap_or(0);
                 for line in &code_lines {
                     let pad = max_w.saturating_sub(display_width(line));
                     let _ = writeln!(
@@ -345,7 +343,9 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
             }
 
             // ── Images ────────────────────────────────────────────────
-            Event::Start(Tag::Image { dest_url, title, .. }) => {
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) => {
                 image_url = dest_url.to_string();
                 image_title = title.to_string();
             }
@@ -410,4 +410,73 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
 
     flush_line(&mut out, &mut line_buf, 0, term_width);
     let _ = out.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_text_keeps_single_overlong_word_intact() {
+        assert_eq!(
+            wrap_text("supercalifragilistic", 5),
+            vec!["supercalifragilistic"]
+        );
+    }
+
+    #[test]
+    fn wrap_text_uses_display_width_when_ansi_and_wide_chars_are_present() {
+        let text = format!("{BOLD_ON}你好{RESET} world");
+        let lines = wrap_text(&text, 6);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(strip_ansi(&lines[0]), "你好");
+        assert_eq!(strip_ansi(&lines[1]), "world");
+        assert!(lines.iter().all(|line| display_width(line) <= 6));
+    }
+
+    #[test]
+    fn flush_line_wraps_quoted_content_and_clears_buffer() {
+        let mut out = Vec::new();
+        let mut line = String::from("alpha beta gamma");
+
+        flush_line(&mut out, &mut line, 1, 12);
+
+        let prefix = format!("{MARGIN}{QUOTE_BAR}\u{2502}  {QUOTE_TEXT}");
+        let expected = format!("{prefix}alpha{RESET}\n{prefix}beta{RESET}\n{prefix}gamma{RESET}\n");
+
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+        assert!(line.is_empty());
+    }
+
+    #[test]
+    fn render_table_aligns_columns_using_visual_width() {
+        let mut out = Vec::new();
+        let rows = vec![
+            vec![format!("{BOLD_ON}标题{RESET}"), String::from("B")],
+            vec![String::from("x"), String::from("long")],
+        ];
+
+        render_table(&mut out, &rows);
+
+        let rendered = String::from_utf8(out).unwrap();
+        let lines: Vec<_> = rendered.lines().collect();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[0],
+            format!("{MARGIN}  {BOLD_ON}标题{RESET}  {DIM_ON}\u{2502}{RESET}  B   ")
+        );
+        assert_eq!(
+            lines[1],
+            format!(
+                "{MARGIN}  {DIM_ON}\u{2500}\u{2500}\u{2500}\u{2500}{RESET}  {DIM_ON}\u{253c}{RESET}  {DIM_ON}\u{2500}\u{2500}\u{2500}\u{2500}{RESET}"
+            )
+        );
+        assert_eq!(
+            lines[2],
+            format!("{MARGIN}  x     {DIM_ON}\u{2502}{RESET}  long")
+        );
+        assert_eq!(display_width(lines[0]), display_width(lines[2]));
+    }
 }

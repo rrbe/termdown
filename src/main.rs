@@ -15,9 +15,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!(
-            "termdown {VERSION} - Render Markdown with large-font headings in the terminal"
-        );
+        println!("termdown {VERSION} - Render Markdown with large-font headings in the terminal");
         println!();
         println!("Usage: {} [OPTIONS] [FILE]", args[0]);
         println!();
