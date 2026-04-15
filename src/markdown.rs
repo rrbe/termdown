@@ -130,6 +130,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_TASKLISTS);
 
     let parser = Parser::new_ext(text, opts);
     let stdout = io::stdout();
@@ -204,6 +205,9 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
             Event::Start(Tag::List(start)) => {
                 if list_stack.is_empty() {
                     block_gap(&mut out, &mut first_block);
+                } else {
+                    // Flush parent item text before starting nested list
+                    flush_line(&mut out, &mut line_buf, quote_depth, term_width);
                 }
                 list_stack.push(ListState {
                     ordered: start.is_some(),
@@ -230,6 +234,16 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
             Event::End(TagEnd::Item) => {
                 flush_line(&mut out, &mut line_buf, quote_depth, term_width);
                 in_item = false;
+            }
+
+            // ── Task list checkboxes ─────────────────────────────────
+            Event::TaskListMarker(checked) => {
+                // Replace the bullet "• " that was already appended by Start(Item)
+                // with the checkbox marker, following glow's style: [✓] / [ ]
+                let marker = if checked { "[\u{2713}] " } else { "[ ] " };
+                if let Some(pos) = line_buf.rfind('\u{2022}') {
+                    line_buf.replace_range(pos..pos + '\u{2022}'.len_utf8() + " ".len(), marker);
+                }
             }
 
             // ── Code blocks (buffered for uniform width) ──────────────
