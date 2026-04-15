@@ -61,9 +61,13 @@ latin = "Inter"
 
 # 中文标题字体
 cjk = "LXGW WenKai"
+
+# 图片标题里的 emoji / 符号 fallback 字体（可选）
+emoji = "Apple Color Emoji"
 ```
 
 混合语言标题（如 "Hello 世界"）会自动按字符选择对应字体渲染。
+H1-H3 标题中的单个 emoji 也会通过 fallback 字体尽量渲染出来。
 
 > **注意：** 正文以 ANSI 纯文本输出，字体由终端模拟器决定，不受 termdown 控制。
 
@@ -104,6 +108,7 @@ rm -rf ~/.termdown
 - **终端兼容** -- 目前仅在 Ghostty 和 iTerm2 上测试过，其他支持 Kitty 协议的终端可能表现不一致
 - **字体选择与降级** -- 字体粗细匹配依赖平台 API（Core Text / fontconfig），不一定能解析到预期的字重变体
 - **主题适配** -- 标题配色为深色背景硬编码，浅色终端主题下对比度可能不足
+- **复杂 emoji 序列** -- 依赖 ZWJ 的复杂 emoji（例如家庭/群组类组合、部分肤色组合）目前仍可能拆成多个字形，因为标题渲染还没有完整文本 shaping
 
 ## 许可证
 

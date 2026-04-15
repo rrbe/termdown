@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-use ab_glyph::FontRef;
+use ab_glyph::{Font, FontRef, GlyphId};
 use font_kit::family_name::FamilyName;
 use font_kit::handle::Handle;
 use font_kit::properties::{Properties, Stretch, Style, Weight};
@@ -62,6 +62,31 @@ fn preferred_cjk_families() -> &'static [&'static str] {
     }
 }
 
+fn preferred_emoji_families() -> &'static [&'static str] {
+    #[cfg(target_os = "macos")]
+    {
+        &["Apple Color Emoji", "Apple Symbols", "Symbol"]
+    }
+    #[cfg(target_os = "linux")]
+    {
+        &[
+            "Noto Color Emoji",
+            "Noto Emoji",
+            "Emoji One Color",
+            "Symbola",
+            "DejaVu Sans",
+        ]
+    }
+    #[cfg(target_os = "windows")]
+    {
+        &["Segoe UI Emoji", "Segoe UI Symbol"]
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        &[]
+    }
+}
+
 // ─── CJK Detection ─────────────────────────────────────────────────────────
 
 /// Returns `true` if the character should be rendered with the CJK font.
@@ -78,21 +103,95 @@ pub fn is_cjk(ch: char) -> bool {
     )
 }
 
-// ─── Font Pair ──────────────────────────────────────────────────────────────
-
-/// A pair of fonts: one for Latin/ASCII text, one for CJK text.
-pub struct FontPair {
-    pub latin: FontRef<'static>,
-    pub cjk: FontRef<'static>,
+pub fn is_emoji_like(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x2190..=0x21FF
+        | 0x2300..=0x23FF
+        | 0x2460..=0x24FF
+        | 0x2600..=0x27FF
+        | 0x2900..=0x297F
+        | 0x2B00..=0x2BFF
+        | 0x1F000..=0x1FAFF
+    )
 }
 
-impl FontPair {
-    /// Pick the appropriate font for a character.
-    pub fn for_char(&self, ch: char) -> &FontRef<'static> {
+// ─── Font Set ───────────────────────────────────────────────────────────────
+
+/// Fonts used for image-rendered headings.
+pub struct FontSet {
+    pub latin: FontRef<'static>,
+    pub cjk: FontRef<'static>,
+    pub emoji: Option<FontRef<'static>>,
+}
+
+pub struct GlyphFont<'a> {
+    pub font: &'a FontRef<'static>,
+    pub glyph_id: GlyphId,
+}
+
+impl FontSet {
+    fn has_renderable_glyph(font: &FontRef<'static>, ch: char) -> Option<GlyphId> {
+        let glyph_id = font.glyph_id(ch);
+        if glyph_id.0 == 0 {
+            return None;
+        }
+        if font.outline(glyph_id).is_some()
+            || font.glyph_raster_image2(glyph_id, u16::MAX).is_some()
+        {
+            return Some(glyph_id);
+        }
+        None
+    }
+
+    fn try_font<'a>(font: &'a FontRef<'static>, ch: char) -> Option<GlyphFont<'a>> {
+        Some(GlyphFont {
+            font,
+            glyph_id: Self::has_renderable_glyph(font, ch)?,
+        })
+    }
+
+    /// Pick the best available font for a character based on script first,
+    /// then fall back across all configured heading fonts.
+    pub fn for_char(&self, ch: char) -> GlyphFont<'_> {
+        if is_emoji_like(ch) {
+            if let Some(font) = self
+                .emoji
+                .as_ref()
+                .and_then(|font| Self::try_font(font, ch))
+            {
+                return font;
+            }
+        }
+
         if is_cjk(ch) {
-            &self.cjk
+            if let Some(font) = Self::try_font(&self.cjk, ch) {
+                return font;
+            }
+            if let Some(font) = Self::try_font(&self.latin, ch) {
+                return font;
+            }
         } else {
-            &self.latin
+            if let Some(font) = Self::try_font(&self.latin, ch) {
+                return font;
+            }
+            if let Some(font) = Self::try_font(&self.cjk, ch) {
+                return font;
+            }
+        }
+
+        if let Some(font) = self
+            .emoji
+            .as_ref()
+            .and_then(|font| Self::try_font(font, ch))
+        {
+            return font;
+        }
+
+        GlyphFont {
+            font: &self.latin,
+            glyph_id: self.latin.glyph_id(ch),
         }
     }
 }
@@ -199,12 +298,36 @@ fn resolve_font(
     FontRef::try_from_slice(FALLBACK_FONT).ok()
 }
 
-/// Resolve a Latin + CJK font pair for the given heading level.
-pub fn get_fonts(level: u8, config: &Config) -> Option<FontPair> {
+fn resolve_optional_font(
+    source: &SystemSource,
+    props: &Properties,
+    user_choice: Option<&str>,
+    platform_defaults: &[&str],
+) -> Option<FontRef<'static>> {
+    if let Some(family) = user_choice {
+        if let Some(font) = try_font(source, family, props) {
+            return Some(font);
+        }
+    }
+    for family in platform_defaults {
+        if let Some(font) = try_font(source, family, props) {
+            return Some(font);
+        }
+    }
+    None
+}
+
+/// Resolve a Latin + CJK + optional emoji font set for the given heading level.
+pub fn get_fonts(level: u8, config: &Config) -> Option<FontSet> {
     let source = SystemSource::new();
     let props = Properties {
         style: Style::Normal,
         weight: weight_for_level(level),
+        stretch: Stretch::NORMAL,
+    };
+    let emoji_props = Properties {
+        style: Style::Normal,
+        weight: Weight::NORMAL,
         stretch: Stretch::NORMAL,
     };
 
@@ -222,5 +345,37 @@ pub fn get_fonts(level: u8, config: &Config) -> Option<FontPair> {
         preferred_cjk_families(),
     )?;
 
-    Some(FontPair { latin, cjk })
+    let emoji = resolve_optional_font(
+        &source,
+        &emoji_props,
+        config.font.heading.emoji.as_deref(),
+        preferred_emoji_families(),
+    );
+
+    Some(FontSet { latin, cjk, emoji })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emoji_font_prefers_renderable_emoji_glyph() {
+        let config = Config::default();
+        let fonts = get_fonts(1, &config).expect("fonts should resolve");
+        let glyph = fonts.for_char('😀');
+        let raster = glyph.font.glyph_raster_image2(glyph.glyph_id, u16::MAX);
+
+        assert!(
+            glyph.font.outline(glyph.glyph_id).is_some() || raster.is_some(),
+            "selected font should be able to render 😀"
+        );
+
+        if let Some(emoji_font) = fonts.emoji.as_ref() {
+            assert!(
+                std::ptr::eq(glyph.font, emoji_font),
+                "emoji-like code points should prefer the emoji font when available"
+            );
+        }
+    }
 }

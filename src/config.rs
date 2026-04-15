@@ -20,11 +20,12 @@ pub struct HeadingFontConfig {
     pub latin: Option<String>,
     /// Font for CJK text (e.g. "LXGW WenKai").
     pub cjk: Option<String>,
+    /// Font for emoji and symbol glyphs in image-rendered headings.
+    pub emoji: Option<String>,
 }
 
 fn config_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))?;
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     Some(PathBuf::from(home).join(".termdown"))
 }
 

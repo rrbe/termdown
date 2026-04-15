@@ -63,9 +63,13 @@ latin = "Inter"
 
 # Font for CJK text in H1-H3 headings
 cjk = "LXGW WenKai"
+
+# Optional emoji / symbol fallback font for image-rendered headings
+emoji = "Apple Color Emoji"
 ```
 
 Headings with mixed scripts (e.g. "Hello 世界") will render each character with the appropriate font automatically.
+Standalone emoji in H1-H3 headings are also supported through font fallback when the selected emoji font exposes outline or raster glyphs.
 
 > **Note:** Body text is rendered as plain ANSI text -- its font is determined by your terminal emulator settings, not by termdown. To change the body font, configure your terminal directly.
 
@@ -106,6 +110,7 @@ rm -rf ~/.termdown
 - **Terminal compatibility** -- only tested on Ghostty and iTerm2; other Kitty-protocol terminals may behave differently
 - **Font selection & fallback** -- weight matching relies on platform font APIs (Core Text / fontconfig) which may not always resolve to the expected variant
 - **Theme awareness** -- heading colors are hardcoded for dark backgrounds; light terminal themes may have poor contrast
+- **Complex emoji sequences** -- ZWJ-heavy emoji sequences (family/grouping variants, some skin-tone combinations) may still render as separate glyphs because heading layout does not perform full text shaping
 
 ## License
 

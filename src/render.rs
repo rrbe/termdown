@@ -1,10 +1,11 @@
-use ab_glyph::{point, Font, PxScale, ScaleFont};
+use ab_glyph::{point, Font, GlyphId, GlyphImageFormat, PxScale, ScaleFont};
 use base64::Engine;
 use image::codecs::png::PngEncoder;
+use image::ImageFormat;
 use image::{ImageEncoder, Rgba, RgbaImage};
 
 use crate::config::Config;
-use crate::font::{self, FontPair};
+use crate::font::{self, FontSet};
 use crate::style;
 
 // ─── Text Metrics ───────────────────────────────────────────────────────────
@@ -16,21 +17,37 @@ struct TextMetrics {
     ascent: f32,
 }
 
-fn measure_text(fonts: &FontPair, scale: PxScale, text: &str, tracking: f32) -> TextMetrics {
+fn is_ignorable_format_char(ch: char) -> bool {
+    let cp = ch as u32;
+    cp == 0x200D || matches!(cp, 0xFE00..=0xFE0F | 0xE0100..=0xE01EF)
+}
+
+fn measure_text(fonts: &FontSet, scale: PxScale, text: &str, tracking: f32) -> TextMetrics {
     let latin_s = fonts.latin.as_scaled(scale);
     let cjk_s = fonts.cjk.as_scaled(scale);
+    let emoji_s = fonts.emoji.as_ref().map(|font| font.as_scaled(scale));
 
-    // Use the tallest ascent and deepest descent across both fonts
-    let ascent = latin_s.ascent().max(cjk_s.ascent());
-    let descent = latin_s.descent().min(cjk_s.descent()); // descent is negative
+    // Use the tallest ascent and deepest descent across all loaded fonts.
+    let ascent = emoji_s
+        .as_ref()
+        .map(|font| latin_s.ascent().max(cjk_s.ascent()).max(font.ascent()))
+        .unwrap_or_else(|| latin_s.ascent().max(cjk_s.ascent()));
+    let descent = emoji_s
+        .as_ref()
+        .map(|font| latin_s.descent().min(cjk_s.descent()).min(font.descent()))
+        .unwrap_or_else(|| latin_s.descent().min(cjk_s.descent())); // descent is negative
 
     let chars: Vec<char> = text.chars().collect();
     let mut width = 0.0f32;
 
     for (i, &ch) in chars.iter().enumerate() {
-        let font = fonts.for_char(ch);
-        let scaled = font.as_scaled(scale);
-        width += scaled.h_advance(font.glyph_id(ch));
+        if is_ignorable_format_char(ch) {
+            continue;
+        }
+
+        let glyph_font = fonts.for_char(ch);
+        let scaled = glyph_font.font.as_scaled(scale);
+        width += scaled.h_advance(glyph_font.glyph_id);
         if tracking > 0.0 && i + 1 < chars.len() {
             width += tracking;
         }
@@ -47,7 +64,7 @@ fn measure_text(fonts: &FontPair, scale: PxScale, text: &str, tracking: f32) -> 
 
 fn draw_text(
     img: &mut RgbaImage,
-    fonts: &FontPair,
+    fonts: &FontSet,
     scale: PxScale,
     baseline: (f32, f32),
     text: &str,
@@ -58,21 +75,28 @@ fn draw_text(
     let y = baseline.1;
 
     for ch in text.chars() {
-        let font = fonts.for_char(ch);
-        let scaled = font.as_scaled(scale);
-        let glyph_id = font.glyph_id(ch);
-        let glyph = glyph_id.with_scale_and_position(scale, point(x, y));
+        if is_ignorable_format_char(ch) {
+            continue;
+        }
 
-        if let Some(outlined) = font.outline_glyph(glyph) {
+        let glyph_font = fonts.for_char(ch);
+        let font = glyph_font.font;
+        let scaled = font.as_scaled(scale);
+        let glyph_id = glyph_font.glyph_id;
+        let glyph = glyph_id.with_scale_and_position(scale, point(x, y));
+        let prefer_raster = font::is_emoji_like(ch)
+            && font
+                .glyph_raster_image2(glyph_id, pixels_per_em(font, scale))
+                .is_some();
+
+        if prefer_raster {
+            draw_raster_glyph(img, font, glyph_id, scale, (x, y), color);
+        } else if let Some(outlined) = font.outline_glyph(glyph) {
             let bounds = outlined.px_bounds();
             outlined.draw(|gx, gy, coverage| {
                 let px = bounds.min.x as i32 + gx as i32;
                 let py = bounds.min.y as i32 + gy as i32;
-                if px >= 0
-                    && py >= 0
-                    && (px as u32) < img.width()
-                    && (py as u32) < img.height()
-                {
+                if px >= 0 && py >= 0 && (px as u32) < img.width() && (py as u32) < img.height() {
                     let alpha = (coverage * color[3] as f32) as u8;
                     if alpha == 0 {
                         return;
@@ -85,9 +109,159 @@ fn draw_text(
                     pixel[3] = ((alpha as f32 + pixel[3] as f32 * (1.0 - a)).min(255.0)) as u8;
                 }
             });
+        } else {
+            draw_raster_glyph(img, font, glyph_id, scale, (x, y), color);
         }
 
         x += scaled.h_advance(glyph_id) + if tracking > 0.0 { tracking } else { 0.0 };
+    }
+}
+
+fn pixels_per_em(font: &ab_glyph::FontRef<'static>, scale: PxScale) -> u16 {
+    let height = font.height_unscaled().max(1.0);
+    let units = font.units_per_em().unwrap_or(height).max(1.0);
+    ((scale.y * units / height).round()).clamp(1.0, u16::MAX as f32) as u16
+}
+
+fn blend_rgba(dst: &mut Rgba<u8>, src: [u8; 4]) {
+    let a = src[3] as f32 / 255.0;
+    if a <= 0.0 {
+        return;
+    }
+    dst[0] = (src[0] as f32 * a + dst[0] as f32 * (1.0 - a)) as u8;
+    dst[1] = (src[1] as f32 * a + dst[1] as f32 * (1.0 - a)) as u8;
+    dst[2] = (src[2] as f32 * a + dst[2] as f32 * (1.0 - a)) as u8;
+    dst[3] = ((src[3] as f32 + dst[3] as f32 * (1.0 - a)).min(255.0)) as u8;
+}
+
+fn blend_premul_bgra(dst: &mut Rgba<u8>, src: [u8; 4]) {
+    let a = src[3] as f32 / 255.0;
+    if a <= 0.0 {
+        return;
+    }
+    dst[0] = (src[2] as f32 + dst[0] as f32 * (1.0 - a)) as u8;
+    dst[1] = (src[1] as f32 + dst[1] as f32 * (1.0 - a)) as u8;
+    dst[2] = (src[0] as f32 + dst[2] as f32 * (1.0 - a)) as u8;
+    dst[3] = ((src[3] as f32 + dst[3] as f32 * (1.0 - a)).min(255.0)) as u8;
+}
+
+fn raster_sample_coverage(
+    format: &GlyphImageFormat,
+    data: &[u8],
+    width: u32,
+    x: u32,
+    y: u32,
+) -> Option<u8> {
+    let bits_per_pixel = match format {
+        GlyphImageFormat::BitmapMono | GlyphImageFormat::BitmapMonoPacked => 1,
+        GlyphImageFormat::BitmapGray2 | GlyphImageFormat::BitmapGray2Packed => 2,
+        GlyphImageFormat::BitmapGray4 | GlyphImageFormat::BitmapGray4Packed => 4,
+        GlyphImageFormat::BitmapGray8 => 8,
+        _ => return None,
+    };
+
+    if bits_per_pixel == 8 {
+        let index = (y * width + x) as usize;
+        return data.get(index).copied();
+    }
+
+    let row_bits = match format {
+        GlyphImageFormat::BitmapMono
+        | GlyphImageFormat::BitmapGray2
+        | GlyphImageFormat::BitmapGray4 => (width * bits_per_pixel).div_ceil(8) * 8,
+        _ => width * bits_per_pixel,
+    };
+    let bit_index = y * row_bits + x * bits_per_pixel;
+    let byte_index = (bit_index / 8) as usize;
+    let shift = 8 - bits_per_pixel - (bit_index % 8);
+    let mask = ((1u16 << bits_per_pixel) - 1) as u8;
+    let value = (data.get(byte_index)? >> shift) & mask;
+
+    Some(match bits_per_pixel {
+        1 => {
+            if value == 0 {
+                0
+            } else {
+                255
+            }
+        }
+        2 => value * 85,
+        4 => value * 17,
+        _ => 0,
+    })
+}
+
+fn draw_raster_glyph(
+    img: &mut RgbaImage,
+    font: &ab_glyph::FontRef<'static>,
+    glyph_id: GlyphId,
+    scale: PxScale,
+    baseline: (f32, f32),
+    color: [u8; 4],
+) {
+    let target_ppem = pixels_per_em(font, scale);
+    let raster = match font.glyph_raster_image2(glyph_id, target_ppem) {
+        Some(raster) => raster,
+        None => return,
+    };
+
+    let src_w = raster.width as u32;
+    let src_h = raster.height as u32;
+    if src_w == 0 || src_h == 0 {
+        return;
+    }
+
+    let scale_factor = target_ppem as f32 / raster.pixels_per_em.max(1) as f32;
+    let draw_w = ((src_w as f32 * scale_factor).round()).max(1.0) as u32;
+    let draw_h = ((src_h as f32 * scale_factor).round()).max(1.0) as u32;
+    let top_x = (baseline.0 + raster.origin.x * scale_factor).round() as i32;
+    let top_y = (baseline.1 - font.as_scaled(scale).ascent() + raster.origin.y * scale_factor)
+        .round() as i32;
+
+    let png_image = match raster.format {
+        GlyphImageFormat::Png => image::load_from_memory_with_format(raster.data, ImageFormat::Png)
+            .ok()
+            .map(|img| img.to_rgba8()),
+        _ => None,
+    };
+
+    for dy in 0..draw_h {
+        let sy = ((dy as f32) / scale_factor).floor().min((src_h - 1) as f32) as u32;
+        let py = top_y + dy as i32;
+        if py < 0 || py >= img.height() as i32 {
+            continue;
+        }
+
+        for dx in 0..draw_w {
+            let sx = ((dx as f32) / scale_factor).floor().min((src_w - 1) as f32) as u32;
+            let px = top_x + dx as i32;
+            if px < 0 || px >= img.width() as i32 {
+                continue;
+            }
+
+            let dst = img.get_pixel_mut(px as u32, py as u32);
+
+            if let Some(png) = png_image.as_ref() {
+                let src = png.get_pixel(sx, sy).0;
+                blend_rgba(dst, src);
+                continue;
+            }
+
+            if matches!(raster.format, GlyphImageFormat::BitmapPremulBgra32) {
+                let idx = ((sy * src_w + sx) * 4) as usize;
+                if let Some(chunk) = raster.data.get(idx..idx + 4) {
+                    blend_premul_bgra(dst, [chunk[0], chunk[1], chunk[2], chunk[3]]);
+                }
+                continue;
+            }
+
+            if let Some(coverage) =
+                raster_sample_coverage(&raster.format, raster.data, src_w, sx, sy)
+            {
+                let alpha = ((coverage as u16 * color[3] as u16) / 255) as u8;
+                blend_rgba(dst, [color[0], color[1], color[2], alpha]);
+            }
+        }
     }
 }
 
