@@ -10,7 +10,6 @@ use std::io::{self, Read};
 
 use terminal_size::{terminal_size, Width};
 
-
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
