@@ -4,7 +4,8 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::config::Config;
 use crate::render;
-use crate::style::*;
+use crate::style::{Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, MARGIN, MARGIN_WIDTH, RESET, STRIKETHROUGH_OFF, STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON, display_width};
+use crate::theme::Theme;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -33,16 +34,16 @@ fn block_gap(out: &mut impl Write, first_block: &mut bool) {
 
 // ─── Line Output ────────────────────────────────────────────────────────────
 
-fn flush_line(out: &mut impl Write, line_buf: &mut String, quote_depth: usize, term_width: usize) {
+fn flush_line(out: &mut impl Write, line_buf: &mut String, quote_depth: usize, term_width: usize, colors: &Colors) {
     if line_buf.is_empty() {
         return;
     }
 
     let prefix = if quote_depth > 0 {
         let bars: String = (0..quote_depth)
-            .map(|_| format!("{QUOTE_BAR}\u{2502}  "))
+            .map(|_| format!("{}\u{2502}  ", colors.quote_bar))
             .collect();
-        format!("{MARGIN}{bars}{QUOTE_TEXT}")
+        format!("{MARGIN}{bars}{}", colors.quote_text)
     } else {
         MARGIN.to_string()
     };
@@ -126,7 +127,7 @@ fn render_table(out: &mut impl Write, rows: &[Vec<String>]) {
 
 // ─── Main Renderer ──────────────────────────────────────────────────────────
 
-pub fn render(text: &str, term_width: usize, config: &Config) {
+pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colors: &Colors) {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -165,7 +166,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
             Event::End(TagEnd::Heading(..)) => {
                 block_gap(&mut out, &mut first_block);
                 if heading_level <= 3 {
-                    match render::render_heading(&heading_text, heading_level, config) {
+                    match render::render_heading(&heading_text, heading_level, config, theme) {
                         Some(png) => {
                             let _ = writeln!(out, "{MARGIN}{}", render::kitty_display(&png));
                         }
@@ -187,7 +188,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 line_buf.clear();
             }
             Event::End(TagEnd::Paragraph) => {
-                flush_line(&mut out, &mut line_buf, quote_depth, term_width);
+                flush_line(&mut out, &mut line_buf, quote_depth, term_width, colors);
             }
 
             // ── Blockquotes ───────────────────────────────────────────
@@ -207,7 +208,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                     block_gap(&mut out, &mut first_block);
                 } else {
                     // Flush parent item text before starting nested list
-                    flush_line(&mut out, &mut line_buf, quote_depth, term_width);
+                    flush_line(&mut out, &mut line_buf, quote_depth, term_width, colors);
                 }
                 list_stack.push(ListState {
                     ordered: start.is_some(),
@@ -232,7 +233,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 }
             }
             Event::End(TagEnd::Item) => {
-                flush_line(&mut out, &mut line_buf, quote_depth, term_width);
+                flush_line(&mut out, &mut line_buf, quote_depth, term_width, colors);
                 in_item = false;
             }
 
@@ -262,8 +263,8 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                     let pad = max_w.saturating_sub(display_width(line));
                     let _ = writeln!(
                         out,
-                        "{MARGIN}{CODE_BG}{CODE_FG} {line}{} {RESET}",
-                        " ".repeat(pad)
+                        "{MARGIN}{}{} {line}{} {RESET}",
+                        colors.code_bg, colors.code_fg, " ".repeat(pad)
                     );
                 }
                 in_code_block = false;
@@ -305,14 +306,14 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
             // ── Links ─────────────────────────────────────────────────
             Event::Start(Tag::Link { dest_url, .. }) => {
                 link_url = dest_url.to_string();
-                line_buf.push_str(LINK_COLOR);
+                line_buf.push_str(colors.link);
                 line_buf.push_str(UNDERLINE_ON);
             }
             Event::End(TagEnd::Link) => {
                 line_buf.push_str(UNDERLINE_OFF);
                 line_buf.push_str(RESET);
                 if !link_url.is_empty() {
-                    line_buf.push_str(&format!(" {URL_COLOR}({link_url}){RESET}"));
+                    line_buf.push_str(&format!(" {}({link_url}){RESET}", colors.url));
                 }
                 link_url.clear();
             }
@@ -380,7 +381,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 if in_heading {
                     heading_text.push_str(&code);
                 } else {
-                    line_buf.push_str(&format!("{CODE_BG}{CODE_FG} {code} {RESET}"));
+                    line_buf.push_str(&format!("{}{} {code} {RESET}", colors.code_bg, colors.code_fg));
                 }
             }
 
@@ -402,7 +403,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 if in_heading {
                     heading_text.push(' ');
                 } else if !in_code_block {
-                    flush_line(&mut out, &mut line_buf, quote_depth, term_width);
+                    flush_line(&mut out, &mut line_buf, quote_depth, term_width, colors);
                     if in_item {
                         let depth = list_stack.len();
                         let indent = "  ".repeat(depth);
@@ -411,7 +412,7 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
                 }
             }
             Event::HardBreak => {
-                flush_line(&mut out, &mut line_buf, quote_depth, term_width);
+                flush_line(&mut out, &mut line_buf, quote_depth, term_width, colors);
             }
             Event::Rule => {
                 block_gap(&mut out, &mut first_block);
@@ -422,13 +423,14 @@ pub fn render(text: &str, term_width: usize, config: &Config) {
         }
     }
 
-    flush_line(&mut out, &mut line_buf, 0, term_width);
+    flush_line(&mut out, &mut line_buf, 0, term_width, colors);
     let _ = out.flush();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::style::strip_ansi;
 
     #[test]
     fn wrap_text_keeps_single_overlong_word_intact() {
@@ -451,12 +453,13 @@ mod tests {
 
     #[test]
     fn flush_line_wraps_quoted_content_and_clears_buffer() {
+        let dark = Colors::for_theme(crate::theme::Theme::Dark);
         let mut out = Vec::new();
         let mut line = String::from("alpha beta gamma");
 
-        flush_line(&mut out, &mut line, 1, 12);
+        flush_line(&mut out, &mut line, 1, 12, &dark);
 
-        let prefix = format!("{MARGIN}{QUOTE_BAR}\u{2502}  {QUOTE_TEXT}");
+        let prefix = format!("{MARGIN}{}\u{2502}  {}", dark.quote_bar, dark.quote_text);
         let expected = format!("{prefix}alpha{RESET}\n{prefix}beta{RESET}\n{prefix}gamma{RESET}\n");
 
         assert_eq!(String::from_utf8(out).unwrap(), expected);

@@ -7,6 +7,7 @@ use image::{ImageEncoder, Rgba, RgbaImage};
 use crate::config::Config;
 use crate::font::{self, FontSet};
 use crate::style;
+use crate::theme::Theme;
 
 // ─── Text Metrics ───────────────────────────────────────────────────────────
 
@@ -269,8 +270,8 @@ fn draw_raster_glyph(
 
 /// Render heading text to a PNG image. Returns `None` if font loading or
 /// PNG encoding fails (caller should fall back to ANSI text).
-pub fn render_heading(text: &str, level: u8, config: &Config) -> Option<Vec<u8>> {
-    let st = style::heading_style(level);
+pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> Option<Vec<u8>> {
+    let st = style::heading_style(level, theme);
     let fonts = font::get_fonts(level, config)?;
     let scale = PxScale {
         x: st.size,

@@ -47,6 +47,9 @@ termdown README.md
 # Pipe from stdin
 cat notes.md | termdown
 
+# Use a specific theme instead of auto-detect
+termdown --theme light README.md
+
 # Flags
 termdown --help
 termdown --version
@@ -57,6 +60,10 @@ termdown --version
 termdown reads configuration from `~/.termdown/config.toml`.
 
 ```toml
+# Theme: "auto" (default), "dark", or "light"
+# Auto-detection queries the terminal background color via OSC 11.
+theme = "auto"
+
 [font.heading]
 # Font for Latin/English text in H1-H3 headings (sans-serif recommended)
 latin = "Inter"
@@ -109,7 +116,7 @@ rm -rf ~/.termdown
 - **Line wrapping** -- long lines may not wrap correctly when mixed with ANSI escape sequences
 - **Terminal compatibility** -- only tested on Ghostty and iTerm2; other Kitty-protocol terminals may behave differently
 - **Font selection & fallback** -- weight matching relies on platform font APIs (Core Text / fontconfig) which may not always resolve to the expected variant
-- **Theme awareness** -- heading colors are hardcoded for dark backgrounds; light terminal themes may have poor contrast
+- **Theme detection** -- auto-detection relies on OSC 11 terminal responses; if your terminal does not support this, use `--theme` or the config file to set the theme manually
 - **Complex emoji sequences** -- ZWJ-heavy emoji sequences (family/grouping variants, some skin-tone combinations) may still render as separate glyphs because heading layout does not perform full text shaping
 
 ## License

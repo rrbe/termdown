@@ -45,6 +45,9 @@ termdown README.md
 # 从 stdin 管道输入
 cat notes.md | termdown
 
+# 指定主题（不使用自动检测）
+termdown --theme light README.md
+
 # 查看帮助
 termdown --help
 termdown --version
@@ -55,6 +58,10 @@ termdown --version
 配置文件位于 `~/.termdown/config.toml`。
 
 ```toml
+# 主题："auto"（默认）、"dark" 或 "light"
+# 自动检测通过 OSC 11 查询终端背景色。
+theme = "auto"
+
 [font.heading]
 # 英文标题字体（推荐无衬线字体）
 latin = "Inter"
@@ -107,7 +114,7 @@ rm -rf ~/.termdown
 - **换行显示** -- 含 ANSI 转义序列的长行可能无法正确换行
 - **终端兼容** -- 目前仅在 Ghostty 和 iTerm2 上测试过，其他支持 Kitty 协议的终端可能表现不一致
 - **字体选择与降级** -- 字体粗细匹配依赖平台 API（Core Text / fontconfig），不一定能解析到预期的字重变体
-- **主题适配** -- 标题配色为深色背景硬编码，浅色终端主题下对比度可能不足
+- **主题检测** -- 自动检测依赖终端对 OSC 11 的响应；如终端不支持，请通过 `--theme` 或配置文件手动指定主题
 - **复杂 emoji 序列** -- 依赖 ZWJ 的复杂 emoji（例如家庭/群组类组合、部分肤色组合）目前仍可能拆成多个字形，因为标题渲染还没有完整文本 shaping
 
 ## 许可证

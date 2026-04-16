@@ -6,6 +6,9 @@ use serde::Deserialize;
 pub struct Config {
     #[serde(default)]
     pub font: FontSection,
+
+    /// Theme override: "dark", "light", or "auto" (default).
+    pub theme: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
