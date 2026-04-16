@@ -37,7 +37,7 @@ jobs:
             archive: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux' && !matrix.cross
@@ -73,7 +73,7 @@ jobs:
           7z a ../../../termdown-${{ matrix.target }}.zip termdown.exe
           cd ../../..
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: termdown-${{ matrix.target }}
           path: termdown-${{ matrix.target }}.${{ matrix.archive }}
@@ -83,9 +83,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
