@@ -16,6 +16,8 @@ Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown exten
 | Link | ✓ | URL printed next to the link text |
 | Image | ⚠ | Placeholder text `[🖼 alt](url)` only — not rendered via Kitty |
 | Horizontal rule | ✓ | |
+| HTML blocks | ✓ | Rendered verbatim as a dim preformatted block; HTML comments dropped |
+| Inline HTML | ⚠ | Format tags (`b`/`strong`, `i`/`em`, `u`, `s`/`del`/`strike`, `code`/`kbd`) map to ANSI; `<br/>` / `<hr/>` handled; comments dropped; unknown tags stripped but their content is preserved. Attributes (e.g. `style="color:red"`, `href`) are not interpreted. |
 
 ## Enabled GFM extensions
 
@@ -27,7 +29,6 @@ Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown exten
 
 ### Mainstream Markdown gaps
 
-- **HTML blocks / inline HTML** — silently dropped (`_ => {}` arm); content mixed with HTML becomes invisible
 - **GFM autolinks** (bare URLs) — `ENABLE_GFM` not set
 - **GFM alerts / admonitions** (`> [!NOTE]`, `[!WARNING]`, …) — rendered as plain blockquote
 - **Footnotes** `[^1]` — `ENABLE_FOOTNOTES` not set

@@ -189,6 +189,34 @@ fn missing_file_returns_read_error() {
 }
 
 #[test]
+fn html_inline_tags_map_to_ansi_and_block_renders_dim() {
+    let input =
+        "hello <b>bold</b> <u>under</u> and <!-- hidden --> tail\n\n<div>\n<p>x</p>\n</div>\n";
+    let output = run_termdown(&["-"], Some(input), &[("TERM_PROGRAM", "ghostty")], &[]);
+    let raw = stdout_text(&output);
+    let clean = strip_ansi(&raw);
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+
+    // Comment gone, inline tag text preserved.
+    assert!(
+        clean.contains("hello bold under and  tail"),
+        "clean output was: {clean:?}"
+    );
+    // Block HTML lines preserved verbatim.
+    assert!(clean.contains("    <div>"), "clean output was: {clean:?}");
+    assert!(
+        clean.contains("    <p>x</p>"),
+        "clean output was: {clean:?}"
+    );
+    assert!(clean.contains("    </div>"), "clean output was: {clean:?}");
+
+    // ANSI codes present in raw output: bold (\x1b[1m) and underline (\x1b[4m).
+    assert!(raw.contains("\x1b[1m"), "raw output: {raw:?}");
+    assert!(raw.contains("\x1b[4m"), "raw output: {raw:?}");
+}
+
+#[test]
 fn unsupported_terminal_emits_warning_on_stderr() {
     let output = run_termdown(
         &["-"],

@@ -134,6 +134,135 @@ fn render_table(out: &mut impl Write, rows: &[Vec<String>]) {
     }
 }
 
+// ─── HTML ───────────────────────────────────────────────────────────────────
+
+enum HtmlFragment<'a> {
+    Comment,
+    Open { name: &'a str },
+    Close { name: &'a str },
+    SelfClose { name: &'a str },
+    Other,
+}
+
+fn html_tag_name(s: &str) -> &str {
+    let end = s
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(s.len());
+    &s[..end]
+}
+
+fn parse_html_fragment(s: &str) -> HtmlFragment<'_> {
+    let s = s.trim();
+    if !s.starts_with('<') || !s.ends_with('>') {
+        return HtmlFragment::Other;
+    }
+    if s.starts_with("<!--") {
+        return HtmlFragment::Comment;
+    }
+    if s.starts_with("<!") || s.starts_with("<?") {
+        return HtmlFragment::Other;
+    }
+    if let Some(inner) = s.strip_prefix("</").and_then(|v| v.strip_suffix('>')) {
+        let name = html_tag_name(inner);
+        if name.is_empty() {
+            return HtmlFragment::Other;
+        }
+        return HtmlFragment::Close { name };
+    }
+    let inner = &s[1..s.len() - 1];
+    let (inner, self_close) = match inner.strip_suffix('/') {
+        Some(i) => (i.trim_end(), true),
+        None => (inner, false),
+    };
+    let name = html_tag_name(inner);
+    if name.is_empty() {
+        return HtmlFragment::Other;
+    }
+    if self_close {
+        HtmlFragment::SelfClose { name }
+    } else {
+        HtmlFragment::Open { name }
+    }
+}
+
+fn inline_tag_on(name: &str, colors: &Colors) -> Option<String> {
+    let n = name.to_ascii_lowercase();
+    match n.as_str() {
+        "b" | "strong" => Some(BOLD_ON.to_string()),
+        "i" | "em" => Some(ITALIC_ON.to_string()),
+        "u" => Some(UNDERLINE_ON.to_string()),
+        "s" | "del" | "strike" => Some(STRIKETHROUGH_ON.to_string()),
+        "code" | "kbd" => Some(format!("{}{} ", colors.code_bg, colors.code_fg)),
+        _ => None,
+    }
+}
+
+fn inline_tag_off(name: &str) -> Option<&'static str> {
+    let n = name.to_ascii_lowercase();
+    match n.as_str() {
+        "b" | "strong" => Some(RESET),
+        "i" | "em" => Some(ITALIC_OFF),
+        "u" => Some(UNDERLINE_OFF),
+        "s" | "del" | "strike" => Some(STRIKETHROUGH_OFF),
+        "code" | "kbd" => Some(" \x1b[0m"),
+        _ => None,
+    }
+}
+
+/// Remove `<!-- ... -->` spans from `s`, including spans that cross newlines.
+/// Unterminated comments drop the tail of the input.
+fn strip_html_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        match rest[start + 4..].find("-->") {
+            Some(end) => rest = &rest[start + 4 + end + 3..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn flush_html_block(out: &mut impl Write, lines: &[String]) {
+    for line in lines {
+        let _ = writeln!(out, "{MARGIN}{DIM_ON}{line}{RESET}");
+    }
+}
+
+fn handle_inline_break(
+    out: &mut impl Write,
+    line_buf: &mut String,
+    list_depth: usize,
+    in_item: bool,
+    quote_depth: usize,
+    term_width: usize,
+    colors: &Colors,
+) {
+    flush_line(out, line_buf, quote_depth, term_width, colors);
+    if in_item {
+        let depth = list_depth.saturating_sub(1);
+        let indent = "  ".repeat(depth);
+        line_buf.push_str(&format!("{indent}  "));
+    }
+}
+
+fn handle_inline_rule(
+    out: &mut impl Write,
+    line_buf: &mut String,
+    quote_depth: usize,
+    term_width: usize,
+    colors: &Colors,
+) {
+    flush_line(out, line_buf, quote_depth, term_width, colors);
+    let width = term_width.min(62).saturating_sub(2);
+    let _ = writeln!(out, "{MARGIN}{DIM_ON}{}{RESET}", "\u{2500}".repeat(width));
+}
+
 // ─── Main Renderer ──────────────────────────────────────────────────────────
 
 pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colors: &Colors) {
@@ -163,6 +292,8 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
     let mut table_row: Vec<String> = Vec::new();
     let mut table_header = false;
     let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut in_html_block = false;
+    let mut html_block_lines: Vec<String> = Vec::new();
 
     for event in parser {
         match event {
@@ -282,6 +413,32 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
                 code_lines.clear();
             }
 
+            // ── HTML block ───────────────────────────────────────────
+            Event::Start(Tag::HtmlBlock) => {
+                block_gap(&mut out, &mut first_block);
+                in_html_block = true;
+                html_block_lines.clear();
+            }
+            Event::End(TagEnd::HtmlBlock) => {
+                let joined = html_block_lines.join("\n");
+                let stripped = strip_html_comments(&joined);
+                let lines: Vec<String> = stripped
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| l.to_string())
+                    .collect();
+                flush_html_block(&mut out, &lines);
+                in_html_block = false;
+                html_block_lines.clear();
+            }
+            Event::Html(s) => {
+                if in_html_block {
+                    for line in s.lines() {
+                        html_block_lines.push(line.to_string());
+                    }
+                }
+            }
+
             // ── Inline formatting ─────────────────────────────────────
             Event::Start(Tag::Strong) => {
                 if !in_heading {
@@ -399,6 +556,46 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
                 }
             }
 
+            // ── Inline HTML ───────────────────────────────────────────
+            Event::InlineHtml(s) => match parse_html_fragment(&s) {
+                HtmlFragment::Comment | HtmlFragment::Other => {}
+                HtmlFragment::SelfClose { name } => {
+                    if name.eq_ignore_ascii_case("br") {
+                        handle_inline_break(
+                            &mut out,
+                            &mut line_buf,
+                            list_stack.len(),
+                            in_item,
+                            quote_depth,
+                            term_width,
+                            colors,
+                        );
+                    } else if name.eq_ignore_ascii_case("hr") {
+                        handle_inline_rule(
+                            &mut out,
+                            &mut line_buf,
+                            quote_depth,
+                            term_width,
+                            colors,
+                        );
+                    }
+                }
+                HtmlFragment::Open { name } => {
+                    if !in_heading {
+                        if let Some(on) = inline_tag_on(name, colors) {
+                            line_buf.push_str(&on);
+                        }
+                    }
+                }
+                HtmlFragment::Close { name } => {
+                    if !in_heading {
+                        if let Some(off) = inline_tag_off(name) {
+                            line_buf.push_str(off);
+                        }
+                    }
+                }
+            },
+
             // ── Text ──────────────────────────────────────────────────
             Event::Text(t) => {
                 if in_heading {
@@ -478,6 +675,116 @@ mod tests {
 
         assert_eq!(String::from_utf8(out).unwrap(), expected);
         assert!(line.is_empty());
+    }
+
+    #[test]
+    fn parse_html_fragment_recognizes_every_shape() {
+        assert!(matches!(
+            parse_html_fragment("<!-- hi -->"),
+            HtmlFragment::Comment
+        ));
+        assert!(matches!(
+            parse_html_fragment("<?xml?>"),
+            HtmlFragment::Other
+        ));
+        assert!(matches!(
+            parse_html_fragment("<!DOCTYPE html>"),
+            HtmlFragment::Other
+        ));
+        assert!(matches!(
+            parse_html_fragment("<br/>"),
+            HtmlFragment::SelfClose { name } if name == "br"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<br />"),
+            HtmlFragment::SelfClose { name } if name == "br"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<b>"),
+            HtmlFragment::Open { name } if name == "b"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<span style=\"color:red\">"),
+            HtmlFragment::Open { name } if name == "span"
+        ));
+        assert!(matches!(
+            parse_html_fragment("</STRONG>"),
+            HtmlFragment::Close { name } if name.eq_ignore_ascii_case("strong")
+        ));
+        assert!(matches!(
+            parse_html_fragment("not a tag"),
+            HtmlFragment::Other
+        ));
+    }
+
+    #[test]
+    fn inline_tag_on_off_maps_known_format_tags() {
+        let colors = Colors::for_theme(crate::theme::Theme::Dark);
+        assert_eq!(inline_tag_on("b", &colors).unwrap(), BOLD_ON);
+        assert_eq!(inline_tag_on("STRONG", &colors).unwrap(), BOLD_ON);
+        assert_eq!(inline_tag_on("i", &colors).unwrap(), ITALIC_ON);
+        assert_eq!(inline_tag_on("u", &colors).unwrap(), UNDERLINE_ON);
+        assert_eq!(inline_tag_on("s", &colors).unwrap(), STRIKETHROUGH_ON);
+        assert_eq!(inline_tag_on("del", &colors).unwrap(), STRIKETHROUGH_ON);
+        assert!(inline_tag_on("code", &colors)
+            .unwrap()
+            .contains(colors.code_bg));
+        assert!(inline_tag_on("span", &colors).is_none());
+
+        assert_eq!(inline_tag_off("strong"), Some(RESET));
+        assert_eq!(inline_tag_off("em"), Some(ITALIC_OFF));
+        assert_eq!(inline_tag_off("u"), Some(UNDERLINE_OFF));
+        assert_eq!(inline_tag_off("strike"), Some(STRIKETHROUGH_OFF));
+        assert_eq!(inline_tag_off("code"), Some(" \x1b[0m"));
+        assert!(inline_tag_off("div").is_none());
+    }
+
+    #[test]
+    fn strip_html_comments_handles_inline_and_multiline() {
+        assert_eq!(
+            strip_html_comments("a <!-- x --> b <!-- y --> c"),
+            "a  b  c"
+        );
+        assert_eq!(
+            strip_html_comments("pre\n<!-- block\ncomment -->\npost"),
+            "pre\n\npost"
+        );
+        assert_eq!(strip_html_comments("head <!-- unterminated"), "head ");
+        assert_eq!(strip_html_comments("no comments here"), "no comments here");
+    }
+
+    #[test]
+    fn flush_html_block_prefixes_margin_and_dims_lines() {
+        let mut out = Vec::new();
+        let lines = vec![
+            String::from("<div>"),
+            String::from("  text"),
+            String::from("</div>"),
+        ];
+        flush_html_block(&mut out, &lines);
+        let got = String::from_utf8(out).unwrap();
+        assert_eq!(
+            got,
+            format!(
+                "{MARGIN}{DIM_ON}<div>{RESET}\n\
+                 {MARGIN}{DIM_ON}  text{RESET}\n\
+                 {MARGIN}{DIM_ON}</div>{RESET}\n"
+            )
+        );
+    }
+
+    #[test]
+    fn handle_inline_break_flushes_and_indents_for_list_item() {
+        let colors = Colors::for_theme(crate::theme::Theme::Dark);
+        let mut out = Vec::new();
+        let mut line = String::from("line one");
+        handle_inline_break(&mut out, &mut line, 2, true, 0, 80, &colors);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{MARGIN}line one\n")
+        );
+        // Nested (depth 2) → indent = "  " * (2-1) + "  " = "    "
+        assert_eq!(line, "    ");
     }
 
     #[test]
