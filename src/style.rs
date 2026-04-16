@@ -118,20 +118,20 @@ impl Colors {
     pub fn for_theme(theme: Theme) -> Self {
         match theme {
             Theme::Dark => Self {
-                link: "\x1b[36m",            // cyan
-                code_fg: "\x1b[38;5;213m",   // pink/magenta
-                code_bg: "\x1b[48;5;236m",   // dark gray background
-                quote_bar: "\x1b[38;5;240m", // gray
+                link: "\x1b[36m",               // cyan
+                code_fg: "\x1b[38;5;213m",      // pink/magenta
+                code_bg: "\x1b[48;5;236m",      // dark gray background
+                quote_bar: "\x1b[38;5;240m",    // gray
                 quote_text: "\x1b[3;38;5;250m", // italic light gray
-                url: "\x1b[38;5;245m",       // subdued gray
+                url: "\x1b[38;5;245m",          // subdued gray
             },
             Theme::Light => Self {
-                link: "\x1b[38;5;26m",       // dark blue
-                code_fg: "\x1b[38;5;125m",   // dark magenta
-                code_bg: "\x1b[48;5;253m",   // light gray background
-                quote_bar: "\x1b[38;5;243m", // medium gray
+                link: "\x1b[38;5;26m",          // dark blue
+                code_fg: "\x1b[38;5;125m",      // dark magenta
+                code_bg: "\x1b[48;5;253m",      // light gray background
+                quote_bar: "\x1b[38;5;243m",    // medium gray
                 quote_text: "\x1b[3;38;5;242m", // italic medium-dark gray
-                url: "\x1b[38;5;241m",       // dark gray
+                url: "\x1b[38;5;241m",          // dark gray
             },
         }
     }

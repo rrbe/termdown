@@ -4,7 +4,10 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::config::Config;
 use crate::render;
-use crate::style::{Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, MARGIN, MARGIN_WIDTH, RESET, STRIKETHROUGH_OFF, STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON, display_width};
+use crate::style::{
+    display_width, Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, MARGIN, MARGIN_WIDTH, RESET,
+    STRIKETHROUGH_OFF, STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
+};
 use crate::theme::Theme;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -34,7 +37,13 @@ fn block_gap(out: &mut impl Write, first_block: &mut bool) {
 
 // ─── Line Output ────────────────────────────────────────────────────────────
 
-fn flush_line(out: &mut impl Write, line_buf: &mut String, quote_depth: usize, term_width: usize, colors: &Colors) {
+fn flush_line(
+    out: &mut impl Write,
+    line_buf: &mut String,
+    quote_depth: usize,
+    term_width: usize,
+    colors: &Colors,
+) {
     if line_buf.is_empty() {
         return;
     }
@@ -264,7 +273,9 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
                     let _ = writeln!(
                         out,
                         "{MARGIN}{}{} {line}{} {RESET}",
-                        colors.code_bg, colors.code_fg, " ".repeat(pad)
+                        colors.code_bg,
+                        colors.code_fg,
+                        " ".repeat(pad)
                     );
                 }
                 in_code_block = false;
@@ -381,7 +392,10 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
                 if in_heading {
                     heading_text.push_str(&code);
                 } else {
-                    line_buf.push_str(&format!("{}{} {code} {RESET}", colors.code_bg, colors.code_fg));
+                    line_buf.push_str(&format!(
+                        "{}{} {code} {RESET}",
+                        colors.code_bg, colors.code_fg
+                    ));
                 }
             }
 
