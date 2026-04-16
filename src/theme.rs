@@ -99,7 +99,7 @@ fn parse_osc11_response(data: &[u8]) -> Theme {
 
     let rest = &s[rgb_start..];
     let rgb_end = rest
-        .find(|c: char| c == '\x1b' || c == '\x07')
+        .find(['\x1b', '\x07'])
         .unwrap_or(rest.len());
     let rgb_str = &rest[..rgb_end];
 
