@@ -431,44 +431,30 @@ pub fn render(text: &str, term_width: usize, config: &Config, theme: Theme, colo
                 in_html_block = false;
                 html_block_lines.clear();
             }
-            Event::Html(s) => {
-                if in_html_block {
-                    for line in s.lines() {
-                        html_block_lines.push(line.to_string());
-                    }
+            Event::Html(s) if in_html_block => {
+                for line in s.lines() {
+                    html_block_lines.push(line.to_string());
                 }
             }
 
             // ── Inline formatting ─────────────────────────────────────
-            Event::Start(Tag::Strong) => {
-                if !in_heading {
-                    line_buf.push_str(BOLD_ON);
-                }
+            Event::Start(Tag::Strong) if !in_heading => {
+                line_buf.push_str(BOLD_ON);
             }
-            Event::End(TagEnd::Strong) => {
-                if !in_heading {
-                    line_buf.push_str(RESET);
-                }
+            Event::End(TagEnd::Strong) if !in_heading => {
+                line_buf.push_str(RESET);
             }
-            Event::Start(Tag::Emphasis) => {
-                if !in_heading {
-                    line_buf.push_str(ITALIC_ON);
-                }
+            Event::Start(Tag::Emphasis) if !in_heading => {
+                line_buf.push_str(ITALIC_ON);
             }
-            Event::End(TagEnd::Emphasis) => {
-                if !in_heading {
-                    line_buf.push_str(ITALIC_OFF);
-                }
+            Event::End(TagEnd::Emphasis) if !in_heading => {
+                line_buf.push_str(ITALIC_OFF);
             }
-            Event::Start(Tag::Strikethrough) => {
-                if !in_heading {
-                    line_buf.push_str(STRIKETHROUGH_ON);
-                }
+            Event::Start(Tag::Strikethrough) if !in_heading => {
+                line_buf.push_str(STRIKETHROUGH_ON);
             }
-            Event::End(TagEnd::Strikethrough) => {
-                if !in_heading {
-                    line_buf.push_str(STRIKETHROUGH_OFF);
-                }
+            Event::End(TagEnd::Strikethrough) if !in_heading => {
+                line_buf.push_str(STRIKETHROUGH_OFF);
             }
 
             // ── Links ─────────────────────────────────────────────────
