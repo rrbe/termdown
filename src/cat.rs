@@ -270,3 +270,65 @@ fn color_bg(c: Color) -> String {
         Color::Rgb(r, g, b) => format!("\x1b[48;2;{r};{g};{b}m"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::{display_width, strip_ansi, BOLD_ON, RESET};
+
+    // ── wrap_text tests (migrated from markdown.rs) ──────────────────────────
+
+    #[test]
+    fn wrap_text_keeps_single_overlong_word_intact() {
+        assert_eq!(
+            wrap_text("supercalifragilistic", 5),
+            vec!["supercalifragilistic"]
+        );
+    }
+
+    #[test]
+    fn wrap_text_uses_display_width_when_ansi_and_wide_chars_are_present() {
+        let text = format!("{BOLD_ON}你好{RESET} world");
+        let lines = wrap_text(&text, 6);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(strip_ansi(&lines[0]), "你好");
+        assert_eq!(strip_ansi(&lines[1]), "world");
+        assert!(lines.iter().all(|line| display_width(line) <= 6));
+    }
+
+    // ── write_paragraph wrapping (adapted from markdown::flush_line) ─────────
+    // The old `flush_line` took a `&mut String` directly; the new equivalent is
+    // `write_paragraph` which takes a `&[Span]`.  We test the same invariant:
+    // quoted content that overflows is word-wrapped and the buffer is consumed.
+
+    #[test]
+    fn write_paragraph_wraps_quoted_content() {
+        use crate::layout::{Span, Style};
+        use crate::style::{Colors, MARGIN};
+        use crate::theme::Theme;
+
+        let colors = Colors::for_theme(Theme::Dark);
+        let mut out: Vec<u8> = Vec::new();
+
+        let spans = vec![Span::Text {
+            content: "alpha beta gamma".into(),
+            style: Style::default(),
+        }];
+
+        // width=12, quote_depth=1 → prefix width = MARGIN_WIDTH(2) + 1*3 = 5,
+        // so max_text_width = 12 - 5 = 7. "alpha" fits (5), "beta" fits (4 → 9
+        // > 7 alone? No: 5+1+4=10 > 7), so lines: "alpha", "beta", "gamma".
+        write_paragraph(&mut out, &spans, 1, 12, &colors);
+
+        let got = String::from_utf8(out).unwrap();
+        let prefix = format!(
+            "{MARGIN}{}\u{2502}  {}",
+            colors.quote_bar, colors.quote_text
+        );
+        // Each wrapped word should appear on its own prefixed line.
+        assert!(got.contains(&format!("{prefix}alpha{RESET}")));
+        assert!(got.contains(&format!("{prefix}beta{RESET}")));
+        assert!(got.contains(&format!("{prefix}gamma{RESET}")));
+    }
+}

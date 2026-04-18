@@ -2,7 +2,6 @@ mod cat;
 mod config;
 mod font;
 mod layout;
-mod markdown;
 mod render;
 mod style;
 mod theme;

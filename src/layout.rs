@@ -1134,4 +1134,212 @@ mod tests {
         assert!(joined.contains("<p>x</p>"));
         assert!(joined.contains("</div>"));
     }
+
+    // ── HTML helper tests (migrated from markdown.rs) ────────────────────────
+
+    #[test]
+    fn parse_html_fragment_recognizes_every_shape() {
+        assert!(matches!(
+            parse_html_fragment("<!-- hi -->"),
+            HtmlFragment::Comment
+        ));
+        assert!(matches!(
+            parse_html_fragment("<?xml?>"),
+            HtmlFragment::Other
+        ));
+        assert!(matches!(
+            parse_html_fragment("<!DOCTYPE html>"),
+            HtmlFragment::Other
+        ));
+        assert!(matches!(
+            parse_html_fragment("<br/>"),
+            HtmlFragment::SelfClose { name } if name == "br"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<br />"),
+            HtmlFragment::SelfClose { name } if name == "br"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<b>"),
+            HtmlFragment::Open { name } if name == "b"
+        ));
+        assert!(matches!(
+            parse_html_fragment("<span style=\"color:red\">"),
+            HtmlFragment::Open { name } if name == "span"
+        ));
+        assert!(matches!(
+            parse_html_fragment("</STRONG>"),
+            HtmlFragment::Close { name } if name.eq_ignore_ascii_case("strong")
+        ));
+        assert!(matches!(
+            parse_html_fragment("not a tag"),
+            HtmlFragment::Other
+        ));
+    }
+
+    // The legacy `inline_tag_on`/`inline_tag_off` were replaced by
+    // `apply_inline_tag_on`/`apply_inline_tag_off`, which mutate a `Style`
+    // instead of returning ANSI strings.  We test the same behavioral intent:
+    // known formatting tags toggle the corresponding style fields.
+    #[test]
+    fn apply_inline_tag_on_off_maps_known_format_tags() {
+        let mut text_buf = String::new();
+        let mut spans: Vec<Span> = Vec::new();
+        let mut style = Style::default();
+
+        // <b> → bold on
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "b");
+        assert!(style.bold);
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "strong");
+        assert!(!style.bold);
+
+        // <STRONG> (uppercase normalised) → bold on
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "STRONG");
+        assert!(style.bold);
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "b");
+        assert!(!style.bold);
+
+        // <i> → italic
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "i");
+        assert!(style.italic);
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "em");
+        assert!(!style.italic);
+
+        // <u> → underline
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "u");
+        assert!(style.underline);
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "u");
+        assert!(!style.underline);
+
+        // <s> → strikethrough
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "s");
+        assert!(style.strikethrough);
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "del");
+        assert!(!style.strikethrough);
+
+        // <code> → bg/fg set
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "code");
+        assert!(style.bg.is_some());
+        assert!(style.fg.is_some());
+        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, "code");
+        assert!(style.bg.is_none());
+        assert!(style.fg.is_none());
+
+        // <span> (unknown) → no style change
+        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, "span");
+        assert_eq!(style, Style::default());
+    }
+
+    #[test]
+    fn strip_html_comments_handles_inline_and_multiline() {
+        assert_eq!(
+            strip_html_comments("a <!-- x --> b <!-- y --> c"),
+            "a  b  c"
+        );
+        assert_eq!(
+            strip_html_comments("pre\n<!-- block\ncomment -->\npost"),
+            "pre\n\npost"
+        );
+        assert_eq!(strip_html_comments("head <!-- unterminated"), "head ");
+        assert_eq!(strip_html_comments("no comments here"), "no comments here");
+    }
+
+    // Adapted from markdown::render_table_aligns_columns_using_visual_width.
+    // `emit_table` now takes `Vec<Vec<Vec<Span>>>` (rows of cells of spans)
+    // and appends `LineKind::Table` lines.  We verify the column count and
+    // that the separator row is inserted after the header.
+    #[test]
+    fn emit_table_aligns_columns_using_visual_width() {
+        use crate::style::display_width;
+
+        let bold_style = Style {
+            bold: true,
+            ..Style::default()
+        };
+
+        // Header row: ["标题" (bold), "B" (bold)]; body row: ["x", "long"]
+        let rows: Vec<Vec<Vec<Span>>> = vec![
+            vec![
+                vec![Span::Text {
+                    content: "标题".into(),
+                    style: bold_style.clone(),
+                }],
+                vec![Span::Text {
+                    content: "B".into(),
+                    style: bold_style.clone(),
+                }],
+            ],
+            vec![
+                vec![Span::Text {
+                    content: "x".into(),
+                    style: Style::default(),
+                }],
+                vec![Span::Text {
+                    content: "long".into(),
+                    style: Style::default(),
+                }],
+            ],
+        ];
+
+        let mut lines: Vec<Line> = Vec::new();
+        emit_table(&mut lines, &rows);
+
+        // header + separator + body = 3 lines
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|l| matches!(l.kind, LineKind::Table)));
+
+        // Separator line should contain only dim spans with box-drawing chars.
+        let sep = &lines[1];
+        assert!(sep.spans.iter().all(|s| match s {
+            Span::Text { content, style } => {
+                style.dim
+                    && (content
+                        .chars()
+                        .all(|c| c == '\u{2500}' || c == '\u{253c}' || c == ' '))
+            }
+            _ => false,
+        }));
+
+        // Column widths: "标题" has display_width 4, "long" has display_width 4.
+        // Header col-0 plain width = 4, body col-0 plain width = 1 → padded to 4.
+        // Verify body row col-0 spans sum to same visual width as header col-0.
+        fn row_col_width(line: &Line, col_idx: usize) -> usize {
+            // spans are [col0_content, col0_pad?, separator, col1_content, ...]
+            // We just measure total display width of non-separator content spans.
+            line.spans
+                .iter()
+                .filter(|s| match s {
+                    Span::Text { content, .. } => {
+                        !content.contains('\u{2502}') && !content.contains('\u{253c}')
+                    }
+                    _ => true,
+                })
+                .map(|s| match s {
+                    Span::Text { content, .. } => display_width(content),
+                    _ => 0,
+                })
+                .sum::<usize>()
+                / (col_idx + 1) // crude: just check totals are consistent
+        }
+        // Simpler: ensure header row and body row have the same total display
+        // width (i.e., padding was applied correctly).
+        let header_width: usize = lines[0]
+            .spans
+            .iter()
+            .map(|s| match s {
+                Span::Text { content, .. } => display_width(content),
+                _ => 0,
+            })
+            .sum();
+        let body_width: usize = lines[2]
+            .spans
+            .iter()
+            .map(|s| match s {
+                Span::Text { content, .. } => display_width(content),
+                _ => 0,
+            })
+            .sum();
+        assert_eq!(header_width, body_width);
+        let _ = row_col_width; // suppress unused warning
+    }
 }
