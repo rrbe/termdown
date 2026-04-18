@@ -11,30 +11,15 @@ pub struct MatchPos {
     pub byte_range: Range<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Forward,
-    Backward,
-}
-
 pub struct SearchState {
-    // `query` retained for future status-bar display; `direction` is consumed
-    // by n/N navigation in Task 5.3.
-    #[allow(dead_code)]
-    pub query: String,
-    #[allow(dead_code)]
-    pub direction: Direction,
     pub matches: Vec<MatchPos>,
     pub current: Option<usize>,
 }
 
 impl SearchState {
-    pub fn new(query: String, direction: Direction, doc: &RenderedDoc) -> Self {
-        let matches = find_all(&query, doc);
+    pub fn new(query: &str, doc: &RenderedDoc) -> Self {
         Self {
-            query,
-            direction,
-            matches,
+            matches: find_all(query, doc),
             current: None,
         }
     }

@@ -23,7 +23,7 @@ use crate::config::Config;
 use crate::layout;
 use crate::style::MARGIN_WIDTH;
 use crate::theme::Theme;
-use crate::tui::search::{Direction as SearchDirection, SearchState};
+use crate::tui::search::SearchState;
 
 use viewport::Viewport;
 
@@ -486,12 +486,7 @@ fn handle_search_key(app: &mut App, ev: Event) -> io::Result<()> {
         event::KeyCode::Enter => {
             let query: String = input.lines().join("");
             app.mode = Mode::Normal;
-            let direction = if reverse {
-                SearchDirection::Backward
-            } else {
-                SearchDirection::Forward
-            };
-            let state = SearchState::new(query, direction, &app.active().doc);
+            let state = SearchState::new(&query, &app.active().doc);
             app.active_mut().search = Some(state);
             apply_search_jump(app, reverse);
         }

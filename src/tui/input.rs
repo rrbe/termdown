@@ -37,6 +37,10 @@ pub fn map_normal(key: KeyEvent) -> Action {
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollLines(1),
         KeyCode::Char('k') | KeyCode::Up => Action::ScrollLines(-1),
 
+        // Note: the bare-char arms below intentionally match regardless of
+        // modifiers, so `Ctrl-d/u/f/b` hit the same actions as `d/u/f/b`.
+        // This matches the design-doc key table and is exercised by
+        // `ctrl_modifier_variants_match_bare_letter`.
         KeyCode::Char('d') => Action::ScrollHalfPage(1),
         KeyCode::Char('u') => Action::ScrollHalfPage(-1),
 
@@ -181,6 +185,30 @@ mod tests {
         assert!(matches!(
             map_normal(press(KeyCode::Char('t'))),
             Action::ToggleToc
+        ));
+    }
+
+    #[test]
+    fn ctrl_modifier_variants_match_bare_letter() {
+        // Design doc promises Ctrl-d/u/f/b as aliases. The match expression
+        // on key.code (without modifier guards) gives us this for free, but
+        // a regression test makes the contract explicit so a future refactor
+        // that adds `if !ctrl` guards won't silently break vim muscle memory.
+        assert!(matches!(
+            map_normal(press_ctrl(KeyCode::Char('d'))),
+            Action::ScrollHalfPage(1)
+        ));
+        assert!(matches!(
+            map_normal(press_ctrl(KeyCode::Char('u'))),
+            Action::ScrollHalfPage(-1)
+        ));
+        assert!(matches!(
+            map_normal(press_ctrl(KeyCode::Char('f'))),
+            Action::ScrollPage(1)
+        ));
+        assert!(matches!(
+            map_normal(press_ctrl(KeyCode::Char('b'))),
+            Action::ScrollPage(-1)
         ));
     }
 

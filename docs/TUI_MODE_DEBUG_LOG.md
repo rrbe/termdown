@@ -125,50 +125,61 @@ user in a real terminal.** The user hit a usage limit before re-testing.
 
 ---
 
+## Round 3 — Flicker when holding `j`
+
+**Symptom.** Scrolling by tapping `j` looks correct, but holding `j`
+for ~1-2 seconds (until macOS key-autorepeat kicks in at ~30 Hz)
+degrades into violent whole-screen flicker.
+
+**Root cause.** Round 2 had set `app.needs_full_redraw = true` after
+*every* processed event as a belt-and-braces safety net. At autorepeat
+rate the event loop fires `terminal.clear()` (emits `\x1b[2J`) plus a
+full PNG re-transmission ~30 times per second, which is exactly what a
+flicker looks like. The `C=1` placement flag landed in Round 2 already
+prevents the cursor-advance cascade the blanket was guarding against,
+so the blanket is now pure harm.
+
+**Fix (`46d7503`).**
+
+- Removed the blanket `needs_full_redraw = true` at the end of
+  `event_loop`.
+- Set `needs_full_redraw = true` only where body geometry or content
+  actually changes: `ToggleToc` (width shift), `Back` / `Forward` /
+  `open_link_target` (doc swap). Resize already had an explicit path.
+- Scroll / search / mode-change events now rely purely on ratatui's
+  cell diff + `images.sync()` — which is what `TUI_MODE_DESIGN.md`
+  originally specified.
+
+Held-`j` should now match the design acceptance bar ("no flicker, no
+lag, no image residue").
+
+---
+
 ## Open Risks / What To Verify Next
 
-Things that the Round 2 fix *should* resolve but haven't been
-confirmed in a real TTY yet. Test these on both Ghostty and iTerm2:
+Residual items from Rounds 1-3. Test on both Ghostty and iTerm2:
 
 1. **Red vertical line on the left edge.** Most plausibly a cascading
-   side-effect of the cursor-advance bug (H6). Should be gone now.
-   If it persists, suspect: a 1-pixel purple H1 background strip
-   bleeding at an image edge, or a stale left-column placement that
-   `reset_placements` isn't catching.
+   side-effect of the cursor-advance bug, addressed by `C=1` in
+   `bec090a`. Likely resolved; reopen if it reappears.
 
-2. **Bottom-heading overlap with the status bar.** Should be resolved
-   by the real-pixel-height-based row computation. If still present:
-   the queried cell pixel height may be wrong on that terminal — add
-   a generous floor (e.g. `rows.max(expected_level_floor)`), or
-   switch to an APC-based cell-size query (`\x1b[16t`).
+2. **Bottom-heading overlap with the status bar.** Resolved by
+   `32455c9` (spacer `VisualLine`s + placement clipping against
+   `body_height`). If still present on a terminal that reports zero
+   pixel size: the per-level fallback undercount may leak through —
+   see #3 below.
 
-3. **Progressive corruption on scroll.** Fully invalidated by
-   `terminal.clear() + reset_placements` on every event. If it
-   *still* happens, the Kitty backend may be holding onto pixel data
-   across `\x1b[2J` — investigate whether `reset_placements` is
-   actually reaching the terminal (stdout flush ordering).
-
-4. **Right-half blank area after scroll.** Should be resolved by
-   per-frame viewport-width resync. If still present: check the
-   `body_area` vs `viewport.width` calculation when ToC is toggled.
-
-5. **Flicker.** The Round 2 fix calls `terminal.clear()` on every
-   event. On some terminals this produces visible flicker. If so,
-   move the dirty-flag logic to only set `needs_full_redraw` when the
-   viewport top or mode actually changes — skip it for events that
-   don't visually change anything (e.g. Ctrl-modifier-only keys).
-
-6. **Terminals that don't report pixel size.** `window_size()` can
+3. **Terminals that don't report pixel size.** `window_size()` can
    return 0 for pixel fields. Our fallback keeps the old per-level
    estimates, which under-count. Consider bumping those fallbacks to
    H1=8, H2=6, H3=4, or add an APC-based `\x1b[16t` probe.
 
-7. **Performance on long docs.** `reset_placements` emits one
-   `delete_placement` per cached image every frame. For a long doc
-   with dozens of headings and held-`j` scrolling, this is
-   measurable. If it becomes a bottleneck, revert to the diff-based
-   `sync` path on non-clear frames (only reset when `needs_full_redraw`
-   was set).
+4. **Performance on long docs.** When a full redraw *does* fire
+   (ToC toggle, doc swap, resize), `reset_placements` + re-transmit
+   runs over every cached image. For a 30-heading doc that's a
+   measurable stall on the ToC-toggle keystroke. Only worth
+   optimizing if it becomes user-visible — normal scroll no longer
+   takes this path.
 
 ---
 
