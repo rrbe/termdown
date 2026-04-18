@@ -29,15 +29,17 @@ struct App {
     viewport: Viewport,
     images: kitty::ImageLifecycle,
     pending_g: bool,
+    path: String,
 }
 
 impl App {
-    fn new(doc: layout::RenderedDoc, height: u16, width: u16) -> Self {
+    fn new(doc: layout::RenderedDoc, path: String, height: u16, width: u16) -> Self {
         Self {
             doc,
             viewport: Viewport::new(height, width),
             images: kitty::ImageLifecycle::default(),
             pending_g: false,
+            path,
         }
     }
 }
@@ -52,20 +54,21 @@ pub fn run(path: &str, config: &Config, theme: Theme) {
     };
     let doc = layout::build(&source, config, theme);
 
-    if let Err(e) = run_ui(doc) {
+    if let Err(e) = run_ui(doc, path.to_string()) {
         eprintln!("termdown: tui error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_ui(doc: layout::RenderedDoc) -> io::Result<()> {
+fn run_ui(doc: layout::RenderedDoc, path: String) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
-    let mut app = App::new(doc, size.height, size.width);
+    let body_height = size.height.saturating_sub(1);
+    let mut app = App::new(doc, path, body_height, size.width);
 
     // Transmit all heading PNGs once; subsequent frames only emit placement commands.
     {
@@ -157,6 +160,15 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
 }
 
 fn draw(frame: &mut ratatui::Frame, app: &App) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::style::{Color as RColor, Style as RStyle};
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(frame.area());
+
+    // Body
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in app.viewport.visible() {
         let logical = &app.doc.lines[vl.logical_index];
@@ -189,7 +201,23 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     }
 
     let para = Paragraph::new(rendered);
-    frame.render_widget(para, frame.area());
+    frame.render_widget(para, chunks[0]);
+
+    // Status bar
+    let pct = progress_percent(app);
+    let status_text = format!(" {}  {pct}%", app.path);
+    let status =
+        Paragraph::new(status_text).style(RStyle::default().bg(RColor::DarkGray).fg(RColor::White));
+    frame.render_widget(status, chunks[1]);
+}
+
+fn progress_percent(app: &App) -> u32 {
+    let total = app.viewport.total_visual_lines() as f64;
+    if total == 0.0 {
+        return 100;
+    }
+    let pos = (app.viewport.top as f64 + app.viewport.height as f64).min(total);
+    ((pos / total) * 100.0).round() as u32
 }
 
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
