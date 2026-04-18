@@ -35,31 +35,128 @@ enum Mode {
     },
 }
 
-struct App {
+/// A single loaded document with its own view state. `App` holds a stack of
+/// these so the user can follow local `.md` links and navigate back/forward.
+struct DocEntry {
+    path: String,
     doc: layout::RenderedDoc,
     viewport: Viewport,
-    images: kitty::ImageLifecycle,
-    pending_g: bool,
-    path: String,
-    mode: Mode,
     search: Option<SearchState>,
-    should_quit: bool,
+    pending_g: bool,
     toc_open: bool,
 }
 
+struct App {
+    docs: Vec<DocEntry>,
+    cursor: usize,
+    history: Vec<usize>,
+    forward: Vec<usize>,
+    mode: Mode,
+    images: kitty::ImageLifecycle,
+    /// Global monotonically-increasing image id allocator. Ensures ids stay
+    /// unique across all docs loaded during the session so kitty placements
+    /// don't collide between back/forward navigations.
+    next_image_id: u32,
+    /// Body area size (width, height), i.e. terminal size minus the status row.
+    /// Remembered so `push_new_doc` can build a correctly-sized `Viewport`.
+    term_size: (u16, u16),
+    should_quit: bool,
+}
+
 impl App {
-    fn new(doc: layout::RenderedDoc, path: String, height: u16, width: u16) -> Self {
-        Self {
-            doc,
-            viewport: Viewport::new(height, width),
-            images: kitty::ImageLifecycle::default(),
-            pending_g: false,
-            path,
+    fn new_with_initial_doc(
+        path: String,
+        doc: layout::RenderedDoc,
+        body_height: u16,
+        width: u16,
+    ) -> Self {
+        let mut app = App {
+            docs: Vec::new(),
+            cursor: 0,
+            history: Vec::new(),
+            forward: Vec::new(),
             mode: Mode::Normal,
-            search: None,
+            images: kitty::ImageLifecycle::default(),
+            next_image_id: 1,
+            term_size: (width, body_height),
             should_quit: false,
-            toc_open: false,
+        };
+        app.push_new_doc(path, doc);
+        app
+    }
+
+    fn active(&self) -> &DocEntry {
+        &self.docs[self.cursor]
+    }
+
+    fn active_mut(&mut self) -> &mut DocEntry {
+        &mut self.docs[self.cursor]
+    }
+
+    /// Append a new `DocEntry` and return its index. Re-numbers the doc's
+    /// image ids (and any `HeadingImage` / `LineKind::Heading { id }` refs
+    /// that point at them) from the global allocator so ids never collide
+    /// across docs in a single session.
+    #[allow(dead_code)] // Consumed by Task 7.3 (follow-link-to-another-md).
+    fn push_new_doc(&mut self, path: String, mut doc: layout::RenderedDoc) -> usize {
+        let offset = self.next_image_id;
+        // layout::build() assigns ids starting at 1; shift each by (offset - 1)
+        // so the first image of this doc becomes `offset`.
+        let mut id_map: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        for img in &mut doc.images {
+            let new_id = offset + (img.id - 1);
+            id_map.insert(img.id, new_id);
+            img.id = new_id;
         }
+        if let Some(max) = doc.images.iter().map(|i| i.id).max() {
+            self.next_image_id = max + 1;
+        }
+        // Patch Span::HeadingImage and LineKind::Heading { id } references.
+        for line in &mut doc.lines {
+            for span in &mut line.spans {
+                if let layout::Span::HeadingImage { id, .. } = span {
+                    if let Some(&new) = id_map.get(id) {
+                        *id = new;
+                    }
+                }
+            }
+            if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
+                if let Some(&new) = id_map.get(hid) {
+                    *hid = new;
+                }
+            }
+        }
+        let (width, height) = self.term_size;
+        let viewport = Viewport::new(height, width);
+        let entry = DocEntry {
+            path,
+            doc,
+            viewport,
+            search: None,
+            pending_g: false,
+            toc_open: false,
+        };
+        self.docs.push(entry);
+        self.docs.len() - 1
+    }
+
+    /// Transmit the active doc's images to the terminal. Idempotent for repeats
+    /// (kitty drops re-registration of the same id silently; `ImageLifecycle`
+    /// also tracks already-registered ids).
+    fn register_active_images<W: Write>(&mut self, w: &mut W) -> io::Result<()> {
+        // Clone out the (id, png) pairs first to avoid aliasing &self.docs while
+        // we also want &mut self.images.
+        let doc_images: Vec<(u32, Vec<u8>)> = self
+            .active()
+            .doc
+            .images
+            .iter()
+            .map(|i| (i.id, i.png.clone()))
+            .collect();
+        for (id, png) in &doc_images {
+            self.images.register(w, *id, png)?;
+        }
+        Ok(())
     }
 }
 
@@ -87,23 +184,21 @@ fn run_ui(doc: layout::RenderedDoc, path: String) -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
     let body_height = size.height.saturating_sub(1);
-    let mut app = App::new(doc, path, body_height, size.width);
+    let mut app = App::new_with_initial_doc(path, doc, body_height, size.width);
 
     // Transmit all heading PNGs once; subsequent frames only emit placement commands.
     {
-        let mut stdout = io::stdout().lock();
-        for img in &app.doc.images {
-            app.images.register(&mut stdout, img.id, &img.png)?;
-        }
-        stdout.flush()?;
+        let mut out = io::stdout().lock();
+        app.register_active_images(&mut out)?;
+        out.flush()?;
     }
 
     let result = event_loop(&mut terminal, &mut app);
 
     {
-        let mut stdout = io::stdout().lock();
-        let _ = app.images.cleanup(&mut stdout);
-        let _ = stdout.flush();
+        let mut out = io::stdout().lock();
+        let _ = app.images.cleanup(&mut out);
+        let _ = out.flush();
     }
 
     disable_raw_mode()?;
@@ -114,7 +209,10 @@ fn run_ui(doc: layout::RenderedDoc, path: String) -> io::Result<()> {
 
 fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
     loop {
-        app.viewport.ensure_wrap(&app.doc);
+        {
+            let active = app.active_mut();
+            active.viewport.ensure_wrap(&active.doc);
+        }
         terminal.draw(|frame| draw(frame, app))?;
 
         {
@@ -146,44 +244,50 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
         if key.code == event::KeyCode::Char('g')
             && !key.modifiers.contains(event::KeyModifiers::CONTROL)
         {
-            if app.pending_g {
-                app.viewport.top = 0;
-                app.pending_g = false;
+            let active = app.active_mut();
+            if active.pending_g {
+                active.viewport.top = 0;
+                active.pending_g = false;
             } else {
-                app.pending_g = true;
+                active.pending_g = true;
             }
             return Ok(());
         }
-        app.pending_g = false;
+        app.active_mut().pending_g = false;
 
         match input::map_normal(*key) {
             input::Action::Quit => {
                 app.should_quit = true;
             }
-            input::Action::ScrollLines(d) => app.viewport.scroll_by(d),
+            input::Action::ScrollLines(d) => app.active_mut().viewport.scroll_by(d),
             input::Action::ScrollHalfPage(s) => {
-                let delta = (app.viewport.height as i32 / 2) * s;
-                app.viewport.scroll_by(delta);
+                let active = app.active_mut();
+                let delta = (active.viewport.height as i32 / 2) * s;
+                active.viewport.scroll_by(delta);
             }
             input::Action::ScrollPage(s) => {
-                let delta = app.viewport.height as i32 * s;
-                app.viewport.scroll_by(delta);
+                let active = app.active_mut();
+                let delta = active.viewport.height as i32 * s;
+                active.viewport.scroll_by(delta);
             }
-            input::Action::JumpStart => app.viewport.top = 0,
+            input::Action::JumpStart => app.active_mut().viewport.top = 0,
             input::Action::JumpEnd => {
-                let max_top = app
+                let active = app.active_mut();
+                let max_top = active
                     .viewport
                     .total_visual_lines()
-                    .saturating_sub(app.viewport.height as usize);
-                app.viewport.top = max_top;
+                    .saturating_sub(active.viewport.height as usize);
+                active.viewport.top = max_top;
             }
             input::Action::NextHeading => {
-                app.viewport
-                    .jump_to_next_heading(&app.doc, app.viewport.top);
+                let active = app.active_mut();
+                let top = active.viewport.top;
+                active.viewport.jump_to_next_heading(&active.doc, top);
             }
             input::Action::PrevHeading => {
-                app.viewport
-                    .jump_to_prev_heading(&app.doc, app.viewport.top);
+                let active = app.active_mut();
+                let top = active.viewport.top;
+                active.viewport.jump_to_prev_heading(&active.doc, top);
             }
             input::Action::SearchBegin { reverse } => {
                 let mut ta = TextArea::default();
@@ -196,16 +300,35 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             input::Action::SearchNext => advance_search(app, 1),
             input::Action::SearchPrev => advance_search(app, -1),
             input::Action::ToggleToc => {
-                app.toc_open = !app.toc_open;
+                let active = app.active_mut();
+                active.toc_open = !active.toc_open;
                 // Recompute viewport width for the new body area.
-                let new_width = if app.toc_open {
-                    app.viewport.width.saturating_sub(30)
+                let new_width = if active.toc_open {
+                    active.viewport.width.saturating_sub(30)
                 } else {
-                    app.viewport.width.saturating_add(30)
+                    active.viewport.width.saturating_add(30)
                 };
-                app.viewport.width = new_width;
+                active.viewport.width = new_width;
                 // ensure_wrap keys on `cache_width == self.width`; changing width
                 // invalidates the cache so the next frame re-wraps correctly.
+            }
+            input::Action::Back => {
+                if let Some(prev) = app.history.pop() {
+                    app.forward.push(app.cursor);
+                    app.cursor = prev;
+                    let mut out = io::stdout().lock();
+                    let _ = app.register_active_images(&mut out);
+                    let _ = out.flush();
+                }
+            }
+            input::Action::Forward => {
+                if let Some(next) = app.forward.pop() {
+                    app.history.push(app.cursor);
+                    app.cursor = next;
+                    let mut out = io::stdout().lock();
+                    let _ = app.register_active_images(&mut out);
+                    let _ = out.flush();
+                }
             }
             // Other actions land in later tasks. No-op for now.
             _ => {}
@@ -237,8 +360,8 @@ fn handle_search_key(app: &mut App, ev: Event) -> io::Result<()> {
             } else {
                 SearchDirection::Forward
             };
-            let state = SearchState::new(query, direction, &app.doc);
-            app.search = Some(state);
+            let state = SearchState::new(query, direction, &app.active().doc);
+            app.active_mut().search = Some(state);
             apply_search_jump(app, reverse);
         }
         _ => {
@@ -249,14 +372,15 @@ fn handle_search_key(app: &mut App, ev: Event) -> io::Result<()> {
 }
 
 fn apply_search_jump(app: &mut App, reverse: bool) {
-    let Some(state) = app.search.as_mut() else {
+    let active = app.active_mut();
+    let Some(state) = active.search.as_mut() else {
         return;
     };
     if state.matches.is_empty() {
         state.current = None;
         return;
     }
-    let current_logical = app
+    let current_logical = active
         .viewport
         .visible()
         .first()
@@ -277,11 +401,12 @@ fn apply_search_jump(app: &mut App, reverse: bool) {
     };
     state.current = Some(idx);
     let line = state.matches[idx].line_index;
-    center_on_logical(&mut app.viewport, line);
+    center_on_logical(&mut active.viewport, line);
 }
 
 fn advance_search(app: &mut App, delta: i32) {
-    let Some(state) = app.search.as_mut() else {
+    let active = app.active_mut();
+    let Some(state) = active.search.as_mut() else {
         return;
     };
     if state.matches.is_empty() {
@@ -292,7 +417,7 @@ fn advance_search(app: &mut App, delta: i32) {
     let next = ((cur + delta) % len + len) % len;
     state.current = Some(next as usize);
     let line = state.matches[next as usize].line_index;
-    center_on_logical(&mut app.viewport, line);
+    center_on_logical(&mut active.viewport, line);
 }
 
 fn center_on_logical(vp: &mut Viewport, logical: usize) {
@@ -430,9 +555,11 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
+    let active = app.active();
+
     // Body
     // Precompute the current-match identity for "is this the current one" checks.
-    let current_logical: Option<(usize, usize)> = app.search.as_ref().and_then(|s| {
+    let current_logical: Option<(usize, usize)> = active.search.as_ref().and_then(|s| {
         s.current.map(|i| {
             let m = &s.matches[i];
             (m.line_index, m.byte_range.start)
@@ -440,8 +567,8 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     });
 
     let mut rendered: Vec<RLine> = Vec::new();
-    for vl in app.viewport.visible() {
-        let logical = &app.doc.lines[vl.logical_index];
+    for vl in active.viewport.visible() {
+        let logical = &active.doc.lines[vl.logical_index];
 
         // Compute image-height expansion (only on the first visual line for the logical).
         let is_first_visual_of_logical = vl.byte_start == 0;
@@ -455,7 +582,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         }
 
         let matches = visible_matches_for_line(
-            app.search.as_ref(),
+            active.search.as_ref(),
             vl.logical_index,
             vl.byte_start,
             vl.byte_end,
@@ -471,7 +598,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         }
     }
 
-    let body_area = if app.toc_open {
+    let body_area = if active.toc_open {
         let split = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([
@@ -479,7 +606,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
                 ratatui::layout::Constraint::Min(20),
             ])
             .split(chunks[0]);
-        let toc_items: Vec<ratatui::widgets::ListItem> = app
+        let toc_items: Vec<ratatui::widgets::ListItem> = active
             .doc
             .headings
             .iter()
@@ -504,7 +631,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 
     // Status bar
     let pct = progress_percent(app);
-    let status_text = format!(" {}  {pct}%", app.path);
+    let status_text = format!(" {}  {pct}%", active.path);
     let status =
         Paragraph::new(status_text).style(RStyle::default().bg(RColor::DarkGray).fg(RColor::White));
     frame.render_widget(status, chunks[1]);
@@ -520,16 +647,18 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 }
 
 fn progress_percent(app: &App) -> u32 {
-    let total = app.viewport.total_visual_lines() as f64;
+    let vp = &app.active().viewport;
+    let total = vp.total_visual_lines() as f64;
     if total == 0.0 {
         return 100;
     }
-    let pos = (app.viewport.top as f64 + app.viewport.height as f64).min(total);
+    let pos = (vp.top as f64 + vp.height as f64).min(total);
     ((pos / total) * 100.0).round() as u32
 }
 
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
-    let col_offset: u16 = if app.toc_open {
+    let active = app.active();
+    let col_offset: u16 = if active.toc_open {
         // ToC panel (30) + margin within body panel (MARGIN_WIDTH).
         30 + MARGIN_WIDTH as u16
     } else {
@@ -537,8 +666,8 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     };
     let mut out = HashMap::new();
     let mut visual_row: u16 = 0;
-    for vl in app.viewport.visible() {
-        let logical = &app.doc.lines[vl.logical_index];
+    for vl in active.viewport.visible() {
+        let logical = &active.doc.lines[vl.logical_index];
         let is_first_visual_of_logical = vl.byte_start == 0;
         let mut image_rows: u16 = 0;
         if is_first_visual_of_logical {
