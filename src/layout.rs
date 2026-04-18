@@ -93,7 +93,7 @@ pub struct HeadingEntry {
 }
 
 #[allow(dead_code)] // TODO: removed in Task 1.9 once main.rs consumes this
-pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
+pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -105,9 +105,84 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
     let mut text_buf = String::new();
     let mut style = Style::default();
     let mut pending_link_url: Option<String> = None;
+    let mut heading_level: u8 = 0;
+    let mut heading_text = String::new();
+    let mut next_image_id: u32 = 1;
+    let mut images: Vec<HeadingImage> = Vec::new();
+    let mut headings: Vec<HeadingEntry> = Vec::new();
 
     for event in parser {
         match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                heading_level = match level {
+                    pulldown_cmark::HeadingLevel::H1 => 1,
+                    pulldown_cmark::HeadingLevel::H2 => 2,
+                    pulldown_cmark::HeadingLevel::H3 => 3,
+                    pulldown_cmark::HeadingLevel::H4 => 4,
+                    pulldown_cmark::HeadingLevel::H5 => 5,
+                    pulldown_cmark::HeadingLevel::H6 => 6,
+                };
+                heading_text.clear();
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                let text = std::mem::take(&mut heading_text);
+                headings.push(HeadingEntry {
+                    level: heading_level,
+                    text: text.clone(),
+                    line_index: lines.len(),
+                });
+
+                let (id_for_kind, heading_spans): (Option<u32>, Vec<Span>) = if heading_level <= 3 {
+                    match crate::render::render_heading(&text, heading_level, config, theme) {
+                        Some(png) => {
+                            let id = next_image_id;
+                            next_image_id += 1;
+                            let rows = match heading_level {
+                                1 => 6,
+                                2 => 4,
+                                _ => 3,
+                            };
+                            images.push(HeadingImage {
+                                id,
+                                png,
+                                cols: 0,
+                                rows,
+                            });
+                            (Some(id), vec![Span::HeadingImage { id, rows }])
+                        }
+                        None => (
+                            None,
+                            vec![Span::Text {
+                                content: text.clone(),
+                                style: Style {
+                                    bold: true,
+                                    ..Style::default()
+                                },
+                            }],
+                        ),
+                    }
+                } else {
+                    (
+                        None,
+                        vec![Span::Text {
+                            content: text.clone(),
+                            style: Style {
+                                bold: true,
+                                ..Style::default()
+                            },
+                        }],
+                    )
+                };
+
+                lines.push(Line {
+                    spans: heading_spans,
+                    kind: LineKind::Heading {
+                        level: heading_level,
+                        id: id_for_kind,
+                    },
+                });
+                heading_level = 0;
+            }
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
                 flush_text(&mut text_buf, &mut spans, &style);
@@ -164,15 +239,21 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
                     style: code_style,
                 });
             }
-            Event::Text(t) => text_buf.push_str(&t),
+            Event::Text(t) => {
+                if heading_level > 0 {
+                    heading_text.push_str(&t);
+                } else {
+                    text_buf.push_str(&t);
+                }
+            }
             _ => {}
         }
     }
 
     RenderedDoc {
         lines,
-        headings: vec![],
-        images: vec![],
+        headings,
+        images,
     }
 }
 
@@ -299,5 +380,61 @@ mod tests {
             _ => None,
         });
         assert!(code.is_some());
+    }
+
+    #[test]
+    fn build_h1_emits_heading_line_and_entry() {
+        let md = "# Title\n\nbody\n";
+        let doc = build_plain(md);
+
+        let heading_line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Heading { level: 1, .. }))
+            .expect("H1 line should exist");
+
+        // Either image span (if fonts resolved) or text fallback — both are valid.
+        let ok = heading_line
+            .spans
+            .iter()
+            .any(|s| matches!(s, Span::HeadingImage { .. }))
+            || heading_line.spans.iter().any(|s| {
+                matches!(
+                    s,
+                    Span::Text { content, style } if content == "Title" && style.bold
+                )
+            });
+        assert!(ok);
+
+        let entry = doc.headings.iter().find(|h| h.level == 1);
+        assert!(matches!(entry, Some(e) if e.text == "Title"));
+    }
+
+    #[test]
+    fn build_h5_emits_text_only_line() {
+        let doc = build_plain("##### tiny\n");
+        let line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Heading { level: 5, id: None }))
+            .expect("H5 line should exist with id=None");
+        let bold = line.spans.iter().any(|s| {
+            matches!(
+                s,
+                Span::Text { content, style } if content == "tiny" && style.bold
+            )
+        });
+        assert!(bold);
+    }
+
+    #[test]
+    fn build_h1_h2_h3_get_unique_image_ids() {
+        // Only meaningful when fonts are present; assert uniqueness *if* multiple images produced.
+        let doc = build_plain("# A\n\n## B\n\n### C\n");
+        let ids: Vec<u32> = doc.images.iter().map(|i| i.id).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len(), "image ids should be unique");
     }
 }
