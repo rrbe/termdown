@@ -3,9 +3,6 @@
 //! v1 wrap is a no-op (one visual line per logical line). Task 4.4 replaces
 //! `wrap_all` with a width-aware breaker.
 
-// Public API is consumed by Task 2.5 (wire viewport into event loop).
-#![allow(dead_code)]
-
 use crate::layout::{Line, RenderedDoc, Span};
 
 /// A wrapped visual line, pointing back to a logical `Line` and the byte
@@ -13,7 +10,10 @@ use crate::layout::{Line, RenderedDoc, Span};
 #[derive(Debug, Clone)]
 pub struct VisualLine {
     pub logical_index: usize,
+    // Task 4.4 will use these for width-aware wrap slicing.
+    #[allow(dead_code)]
     pub byte_start: usize,
+    #[allow(dead_code)]
     pub byte_end: usize,
 }
 
@@ -65,6 +65,8 @@ impl Viewport {
         &self.visual_lines[self.top..end]
     }
 
+    // Used in tests; production callers arrive in a later task.
+    #[allow(dead_code)]
     pub fn total_visual_lines(&self) -> usize {
         self.visual_lines.len()
     }
