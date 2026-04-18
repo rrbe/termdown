@@ -203,10 +203,8 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                 });
                 heading_level = 0;
             }
-            Event::Start(Tag::Paragraph) => {
-                if quote_depth == 0 && !in_item {
-                    push_block_gap(&mut lines);
-                }
+            Event::Start(Tag::Paragraph) if quote_depth == 0 && !in_item => {
+                push_block_gap(&mut lines);
             }
             Event::End(TagEnd::Paragraph) => {
                 flush_text(&mut text_buf, &mut spans, &style);
