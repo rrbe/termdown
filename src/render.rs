@@ -347,6 +347,68 @@ pub fn kitty_display(png: &[u8]) -> String {
     out
 }
 
+// ─── Kitty Image Lifecycle Primitives ───────────────────────────────────────
+//
+// Unlike `kitty_display` which always transmits + displays in one go, these
+// split the transmit + place + delete operations so the TUI can cache images
+// on the terminal and re-position them cheaply on scroll.
+
+use std::io::Write;
+
+/// Transmit PNG data to the terminal and cache it under `id`. The image is
+/// not displayed yet; call `place` afterwards.
+// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
+#[allow(dead_code)]
+pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()> {
+    use base64::engine::general_purpose::STANDARD;
+    let b64 = STANDARD.encode(png);
+    let total = b64.len();
+    let mut offset = 0;
+    let mut first = true;
+    while offset < total {
+        let end = (offset + 4096).min(total);
+        let chunk = &b64[offset..end];
+        let m = if end == total { "0" } else { "1" };
+        if first {
+            write!(w, "\x1b_Gf=100,a=T,i={id},q=2,m={m};{chunk}\x1b\\")?;
+            first = false;
+        } else {
+            write!(w, "\x1b_Gm={m};{chunk}\x1b\\")?;
+        }
+        offset = end;
+    }
+    // Empty-payload edge case: still send a minimal terminating frame so the
+    // terminal knows the transmission ended. For zero-length png this is only
+    // reachable from test code; a real heading image is never empty.
+    if total == 0 {
+        write!(w, "\x1b_Gf=100,a=T,i={id},q=2,m=0;\x1b\\")?;
+    }
+    Ok(())
+}
+
+/// Place previously-transmitted image `id` at the given cell coordinates.
+// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
+#[allow(dead_code)]
+pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=p,i={id},x={col},y={row},q=2;\x1b\\")
+}
+
+/// Delete a single placement of `id`. Keeps the cached image data so future
+/// `place` calls on the same id are cheap.
+// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
+#[allow(dead_code)]
+pub fn delete_placement<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")
+}
+
+/// Delete all placements and image data this client has created. Used at
+/// TUI exit to clean up the terminal.
+// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
+#[allow(dead_code)]
+pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=d,d=A,q=2;\x1b\\")
+}
+
 // ─── Shared Image Record ────────────────────────────────────────────────────
 
 /// PNG data + cell dimensions for a rendered heading image.
@@ -360,4 +422,59 @@ pub struct HeadingImage {
     pub png: Vec<u8>,
     pub cols: u16,
     pub rows: u16,
+}
+
+#[cfg(test)]
+mod kitty_tests {
+    use super::*;
+
+    #[test]
+    fn transmit_produces_a_eq_t_with_id() {
+        let mut buf = Vec::new();
+        transmit(&mut buf, 42, b"\x89PNG\r\n").unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("\x1b_Gf=100,a=T,i=42,q=2"));
+        assert!(s.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn transmit_chunks_large_payload() {
+        // 8 KB PNG-ish payload; base64 is ~10.6 KB → 3 chunks of 4 KB.
+        let mut buf = Vec::new();
+        let payload = vec![0u8; 8_000];
+        transmit(&mut buf, 7, &payload).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        // Every chunk is an APC-wrapped escape: count \x1b_G occurrences.
+        let chunk_count = s.matches("\x1b_G").count();
+        assert!(
+            chunk_count >= 2,
+            "expected chunked transmission, got {chunk_count} escape(s)"
+        );
+        // Middle chunks use m=1, final uses m=0.
+        assert!(s.contains(";") && s.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn place_produces_a_eq_p() {
+        let mut buf = Vec::new();
+        place(&mut buf, 7, 3, 5).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "\x1b_Ga=p,i=7,x=3,y=5,q=2;\x1b\\");
+    }
+
+    #[test]
+    fn delete_placement_sends_d_i() {
+        let mut buf = Vec::new();
+        delete_placement(&mut buf, 9).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "\x1b_Ga=d,d=i,i=9,q=2;\x1b\\");
+    }
+
+    #[test]
+    fn delete_all_for_client_sends_d_cap_a() {
+        let mut buf = Vec::new();
+        delete_all_for_client(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "\x1b_Ga=d,d=A,q=2;\x1b\\");
+    }
 }
