@@ -1,4 +1,8 @@
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+use crate::config::Config;
 use crate::render::HeadingImage;
+use crate::theme::Theme;
 
 // The following items are scaffolding for the TUI pipeline introduced in Task 1.1.
 // Each #[allow(dead_code)] is intentionally temporary and should be removed as the
@@ -88,6 +92,41 @@ pub struct HeadingEntry {
     pub line_index: usize,
 }
 
+#[allow(dead_code)] // TODO: removed in Task 1.9 once main.rs consumes this
+pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_TASKLISTS);
+    let parser = Parser::new_ext(md, opts);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut current = String::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => {
+                lines.push(Line {
+                    spans: vec![Span::Text {
+                        content: std::mem::take(&mut current),
+                        style: Style::default(),
+                    }],
+                    kind: LineKind::Body,
+                });
+            }
+            Event::Text(t) => current.push_str(&t),
+            _ => {}
+        }
+    }
+
+    RenderedDoc {
+        lines,
+        headings: vec![],
+        images: vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +144,33 @@ mod tests {
             headings: vec![],
             images: vec![],
         };
+    }
+
+    use crate::config::Config;
+    use crate::theme::Theme;
+
+    fn build_plain(md: &str) -> RenderedDoc {
+        let cfg = Config::default();
+        super::build(md, &cfg, Theme::Dark)
+    }
+
+    #[test]
+    fn build_single_paragraph() {
+        let doc = build_plain("hello world\n");
+        assert!(doc.lines.iter().any(
+            |l| matches!(l.kind, LineKind::Body) && spans_plain_text(&l.spans) == "hello world"
+        ));
+    }
+
+    fn spans_plain_text(spans: &[Span]) -> String {
+        let mut out = String::new();
+        for s in spans {
+            match s {
+                Span::Text { content, .. } => out.push_str(content),
+                Span::Link { content, .. } => out.push_str(content),
+                Span::HeadingImage { .. } => {}
+            }
+        }
+        out
     }
 }
