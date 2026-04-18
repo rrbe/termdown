@@ -5,6 +5,7 @@ mod layout;
 mod render;
 mod style;
 mod theme;
+mod tui;
 
 use std::fs;
 use std::io::{self, Read};
@@ -28,6 +29,7 @@ fn main() {
         println!("  -h, --help                Show this help message");
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
+        println!("  --tui                     Open FILE in interactive TUI mode");
         println!();
         println!("Config: ~/.termdown/config.toml");
         return;
@@ -37,6 +39,8 @@ fn main() {
         println!("termdown {VERSION}");
         return;
     }
+
+    let tui_mode = args.iter().any(|a| a == "--tui");
 
     check_terminal_support();
 
@@ -67,6 +71,18 @@ fn main() {
         }
         found
     };
+
+    if tui_mode {
+        let path = match file_arg.as_deref() {
+            Some("-") | None => {
+                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
+                std::process::exit(2);
+            }
+            Some(p) => p.to_string(),
+        };
+        tui::run(&path, &config, theme);
+        return;
+    }
 
     let md = match file_arg.as_deref() {
         None | Some("-") => {
