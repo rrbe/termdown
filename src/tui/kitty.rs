@@ -111,8 +111,9 @@ mod tests {
         desired.insert(1u32, (5u16, 10u16));
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf.clone()).unwrap();
+        // New format: CUP (1-indexed row+1=11, col+1=6) followed by a=p,i=1.
         assert!(
-            s.contains("a=p,i=1,x=5,y=10"),
+            s.contains("\x1b[11;6H") && s.contains("a=p,i=1"),
             "expected initial place, got: {s:?}"
         );
         assert!(!s.contains("a=d,d=i,i=1"), "no delete expected: {s:?}");
@@ -126,8 +127,9 @@ mod tests {
             s.contains("a=d,d=i,i=1"),
             "expected delete before move: {s:?}"
         );
+        // New format: CUP (1-indexed row+1=9, col+1=6) followed by a=p,i=1.
         assert!(
-            s.contains("a=p,i=1,x=5,y=8"),
+            s.contains("\x1b[9;6H") && s.contains("a=p,i=1"),
             "expected re-place at new pos: {s:?}"
         );
 

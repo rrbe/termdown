@@ -368,7 +368,7 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
         let chunk = &b64[offset..end];
         let m = if end == total { "0" } else { "1" };
         if first {
-            write!(w, "\x1b_Gf=100,a=T,i={id},q=2,m={m};{chunk}\x1b\\")?;
+            write!(w, "\x1b_Gf=100,a=t,i={id},q=2,m={m};{chunk}\x1b\\")?;
             first = false;
         } else {
             write!(w, "\x1b_Gm={m};{chunk}\x1b\\")?;
@@ -379,14 +379,23 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
     // terminal knows the transmission ended. For zero-length png this is only
     // reachable from test code; a real heading image is never empty.
     if total == 0 {
-        write!(w, "\x1b_Gf=100,a=T,i={id},q=2,m=0;\x1b\\")?;
+        write!(w, "\x1b_Gf=100,a=t,i={id},q=2,m=0;\x1b\\")?;
     }
     Ok(())
 }
 
 /// Place previously-transmitted image `id` at the given cell coordinates.
+/// Moves the cursor explicitly because Kitty's `a=p` places at the current
+/// cursor position; the `x` and `y` APC keys are source-image pixel offsets
+/// (for cropping), not terminal cell coordinates.
 pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
-    write!(w, "\x1b_Ga=p,i={id},x={col},y={row},q=2;\x1b\\")
+    // CUP (cursor position) is 1-indexed: row+1, col+1.
+    write!(
+        w,
+        "\x1b[{};{}H\x1b_Ga=p,i={id},q=2;\x1b\\",
+        row + 1,
+        col + 1
+    )
 }
 
 /// Delete a single placement of `id`. Keeps the cached image data so future
@@ -425,7 +434,8 @@ mod kitty_tests {
         let mut buf = Vec::new();
         transmit(&mut buf, 42, b"\x89PNG\r\n").unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.starts_with("\x1b_Gf=100,a=T,i=42,q=2"));
+        // Lowercase 'a=t' — transmit without displaying.
+        assert!(s.starts_with("\x1b_Gf=100,a=t,i=42,q=2"));
         assert!(s.ends_with("\x1b\\"));
     }
 
@@ -447,11 +457,12 @@ mod kitty_tests {
     }
 
     #[test]
-    fn place_produces_a_eq_p() {
+    fn place_produces_cursor_move_then_a_eq_p() {
         let mut buf = Vec::new();
         place(&mut buf, 7, 3, 5).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert_eq!(s, "\x1b_Ga=p,i=7,x=3,y=5,q=2;\x1b\\");
+        // Cursor move is 1-indexed (row+1, col+1), then place by id.
+        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,q=2;\x1b\\");
     }
 
     #[test]
