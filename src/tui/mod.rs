@@ -1,12 +1,11 @@
 //! Interactive TUI mode.
 
 mod input;
-// Task 3.3 wires ImageLifecycle into the event loop; suppress until then.
-#[allow(dead_code)]
 mod kitty;
 mod viewport;
 
-use std::io;
+use std::collections::HashMap;
+use std::io::{self, Write};
 use std::time::Duration;
 
 use crossterm::event::{self, Event};
@@ -20,6 +19,7 @@ use ratatui::Terminal;
 
 use crate::config::Config;
 use crate::layout;
+use crate::style::MARGIN_WIDTH;
 use crate::theme::Theme;
 
 use viewport::Viewport;
@@ -27,6 +27,7 @@ use viewport::Viewport;
 struct App {
     doc: layout::RenderedDoc,
     viewport: Viewport,
+    images: kitty::ImageLifecycle,
 }
 
 impl App {
@@ -34,6 +35,7 @@ impl App {
         Self {
             doc,
             viewport: Viewport::new(height, width),
+            images: kitty::ImageLifecycle::default(),
         }
     }
 }
@@ -63,7 +65,22 @@ fn run_ui(doc: layout::RenderedDoc) -> io::Result<()> {
     let size = terminal.size()?;
     let mut app = App::new(doc, size.height, size.width);
 
+    // Transmit all heading PNGs once; subsequent frames only emit placement commands.
+    {
+        let mut stdout = io::stdout().lock();
+        for img in &app.doc.images {
+            app.images.register(&mut stdout, img.id, &img.png)?;
+        }
+        stdout.flush()?;
+    }
+
     let result = event_loop(&mut terminal, &mut app);
+
+    {
+        let mut stdout = io::stdout().lock();
+        let _ = app.images.cleanup(&mut stdout);
+        let _ = stdout.flush();
+    }
 
     disable_raw_mode()?;
     crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -75,6 +92,13 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
     loop {
         app.viewport.ensure_wrap(&app.doc);
         terminal.draw(|frame| draw(frame, app))?;
+
+        {
+            let mut stdout = io::stdout().lock();
+            let desired = desired_image_placements(app);
+            let _ = app.images.sync(&mut stdout, &desired);
+            let _ = stdout.flush();
+        }
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
@@ -106,28 +130,61 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
 }
 
 fn draw(frame: &mut ratatui::Frame, app: &App) {
-    let rendered: Vec<RLine> = app
-        .viewport
-        .visible()
-        .iter()
-        .map(|vl| {
-            let logical = &app.doc.lines[vl.logical_index];
-            let mut rspans: Vec<RSpan> = Vec::new();
-            for span in &logical.spans {
-                match span {
-                    layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
-                        rspans.push(RSpan::raw(content.clone()));
-                    }
-                    layout::Span::HeadingImage { .. } => {
-                        // Placeholder — Task 3.3 replaces with ImageReserve widget.
-                        rspans.push(RSpan::raw("[image]"));
-                    }
+    let mut rendered: Vec<RLine> = Vec::new();
+    for vl in app.viewport.visible() {
+        let logical = &app.doc.lines[vl.logical_index];
+        let mut rspans: Vec<RSpan> = Vec::new();
+        let mut image_rows: u16 = 0;
+
+        for span in &logical.spans {
+            match span {
+                layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
+                    rspans.push(RSpan::raw(content.clone()));
+                }
+                layout::Span::HeadingImage { rows, .. } => {
+                    image_rows = image_rows.max(*rows);
                 }
             }
-            RLine::from(rspans)
-        })
-        .collect();
+        }
+
+        // Emit the (possibly mixed) rspans line first. If the logical line is
+        // a pure HeadingImage with no text, rspans is empty — that becomes a
+        // single empty RLine reserving the first image row.
+        rendered.push(RLine::from(rspans));
+
+        // Reserve additional empty rows for the image tail.
+        for _ in 1..image_rows.max(1) {
+            if image_rows == 0 {
+                break;
+            }
+            rendered.push(RLine::from(Vec::<RSpan>::new()));
+        }
+    }
 
     let para = Paragraph::new(rendered);
     frame.render_widget(para, frame.area());
+}
+
+fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
+    let col = MARGIN_WIDTH as u16;
+    let mut out = HashMap::new();
+    // Walk the same sequence `draw` walks, tracking the visual-row offset so
+    // image placements land at the same row ratatui leaves blank.
+    let mut visual_row: u16 = 0;
+    for vl in app.viewport.visible() {
+        let logical = &app.doc.lines[vl.logical_index];
+        let mut image_rows: u16 = 0;
+        for span in &logical.spans {
+            if let layout::Span::HeadingImage { id, rows } = span {
+                out.insert(*id, (col, visual_row));
+                image_rows = image_rows.max(*rows);
+            }
+        }
+        if image_rows > 0 {
+            visual_row = visual_row.saturating_add(image_rows);
+        } else {
+            visual_row = visual_row.saturating_add(1);
+        }
+    }
+    out
 }
