@@ -28,6 +28,7 @@ struct App {
     doc: layout::RenderedDoc,
     viewport: Viewport,
     images: kitty::ImageLifecycle,
+    pending_g: bool,
 }
 
 impl App {
@@ -36,6 +37,7 @@ impl App {
             doc,
             viewport: Viewport::new(height, width),
             images: kitty::ImageLifecycle::default(),
+            pending_g: false,
         }
     }
 }
@@ -102,6 +104,23 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
+                if key.kind == event::KeyEventKind::Press
+                    && key.code == event::KeyCode::Char('g')
+                    && !key.modifiers.contains(event::KeyModifiers::CONTROL)
+                {
+                    if app.pending_g {
+                        app.viewport.top = 0;
+                        app.pending_g = false;
+                    } else {
+                        app.pending_g = true;
+                    }
+                    continue;
+                }
+                // Any other key press resets the pending state.
+                if matches!(key.kind, event::KeyEventKind::Press) {
+                    app.pending_g = false;
+                }
+
                 match input::map_normal(key) {
                     input::Action::Quit => return Ok(()),
                     input::Action::ScrollLines(d) => app.viewport.scroll_by(d),
