@@ -202,6 +202,7 @@ impl App {
                         let mut out = std::io::stdout().lock();
                         let _ = self.register_active_images(&mut out);
                         let _ = std::io::Write::flush(&mut out);
+                        self.needs_full_redraw = true;
                     }
                     Err(_) => {
                         // Fall back to opening externally.
@@ -341,14 +342,13 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             if app.should_quit {
                 return Ok(());
             }
-            // Every processed event is potentially state-changing. Force a
-            // full clear+redraw next iteration. This is heavier than an
-            // incremental diff, but it's the only way to guarantee that
-            // terminal cells previously obscured by kitty image pixels get
-            // re-painted and stale cells from prior frames don't leak
-            // through ratatui's diff-based rendering. 60fps flicker is not
-            // a concern since we only redraw on user input.
-            app.needs_full_redraw = true;
+            // Scroll / mode-change / search events rely on ratatui's cell
+            // diff + `images.sync()` for correctness — no full clear. Only
+            // the handlers that actually need a clear (resize, toc toggle,
+            // doc switch) set `needs_full_redraw` themselves. A blanket
+            // full-clear here produces visible flicker at key-autorepeat
+            // rates (~30 Hz) because each frame emits `\x1b[2J` + re-uploads
+            // every heading PNG.
         }
     }
 }
@@ -423,7 +423,10 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                 // viewport.width is re-synced from terminal size at the top
                 // of every event_loop iteration, so we don't need to adjust
                 // it here — the next iteration picks up the new body width
-                // and `ensure_wrap` re-wraps once cache_width drifts.
+                // and `ensure_wrap` re-wraps once cache_width drifts. Width
+                // change shifts every image's col offset, so force a full
+                // clear to avoid stale image pixels on the body side.
+                app.needs_full_redraw = true;
             }
             input::Action::Back => {
                 if let Some(prev) = app.history.pop() {
@@ -432,6 +435,7 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                     let mut out = io::stdout().lock();
                     let _ = app.register_active_images(&mut out);
                     let _ = out.flush();
+                    app.needs_full_redraw = true;
                 }
             }
             input::Action::Forward => {
@@ -441,6 +445,7 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                     let mut out = io::stdout().lock();
                     let _ = app.register_active_images(&mut out);
                     let _ = out.flush();
+                    app.needs_full_redraw = true;
                 }
             }
             input::Action::OpenLink => {
