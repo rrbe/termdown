@@ -92,6 +92,12 @@ pub struct HeadingEntry {
     pub line_index: usize,
 }
 
+#[allow(dead_code)]
+struct ListState {
+    ordered: bool,
+    counter: u64,
+}
+
 #[allow(dead_code)] // TODO: removed in Task 1.9 once main.rs consumes this
 pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut opts = Options::empty();
@@ -110,6 +116,9 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut next_image_id: u32 = 1;
     let mut images: Vec<HeadingImage> = Vec::new();
     let mut headings: Vec<HeadingEntry> = Vec::new();
+    let mut quote_depth: u8 = 0;
+    let mut list_stack: Vec<ListState> = Vec::new();
+    let mut in_code_block: Option<Option<String>> = None;
 
     for event in parser {
         match event {
@@ -186,9 +195,14 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
                 flush_text(&mut text_buf, &mut spans, &style);
+                let kind = if quote_depth > 0 {
+                    LineKind::BlockQuote { depth: quote_depth }
+                } else {
+                    LineKind::Body
+                };
                 lines.push(Line {
                     spans: std::mem::take(&mut spans),
-                    kind: LineKind::Body,
+                    kind,
                 });
             }
             Event::Start(Tag::Strong) => {
@@ -242,10 +256,65 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             Event::Text(t) => {
                 if heading_level > 0 {
                     heading_text.push_str(&t);
+                } else if let Some(lang) = in_code_block.clone() {
+                    for line in t.lines() {
+                        lines.push(Line {
+                            spans: vec![Span::Text {
+                                content: line.to_string(),
+                                style: Style::default(),
+                            }],
+                            kind: LineKind::CodeBlock { lang: lang.clone() },
+                        });
+                    }
                 } else {
                     text_buf.push_str(&t);
                 }
             }
+            Event::Start(Tag::BlockQuote(..)) => quote_depth += 1,
+            Event::End(TagEnd::BlockQuote(..)) => quote_depth = quote_depth.saturating_sub(1),
+
+            Event::Start(Tag::List(start)) => {
+                list_stack.push(ListState {
+                    ordered: start.is_some(),
+                    counter: start.unwrap_or(1),
+                });
+            }
+            Event::End(TagEnd::List(..)) => {
+                list_stack.pop();
+            }
+
+            Event::Start(Tag::Item) => {
+                // New item: clear any prior span accumulator so item content starts clean.
+            }
+            Event::End(TagEnd::Item) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                let depth = list_stack.len() as u8;
+                lines.push(Line {
+                    spans: std::mem::take(&mut spans),
+                    kind: LineKind::ListItem { depth },
+                });
+            }
+
+            Event::Start(Tag::CodeBlock(kind)) => {
+                let lang = match kind {
+                    pulldown_cmark::CodeBlockKind::Fenced(s) if !s.is_empty() => {
+                        Some(s.to_string())
+                    }
+                    _ => None,
+                };
+                in_code_block = Some(lang);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                in_code_block = None;
+            }
+
+            Event::Rule => {
+                lines.push(Line {
+                    spans: vec![],
+                    kind: LineKind::HorizontalRule,
+                });
+            }
+
             _ => {}
         }
     }
@@ -436,5 +505,46 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(ids.len(), sorted.len(), "image ids should be unique");
+    }
+
+    #[test]
+    fn build_blockquote_carries_depth() {
+        let doc = build_plain("> quoted\n");
+        assert!(doc
+            .lines
+            .iter()
+            .any(|l| matches!(l.kind, LineKind::BlockQuote { depth: 1 })));
+    }
+
+    #[test]
+    fn build_unordered_list_item_has_depth() {
+        let doc = build_plain("- a\n- b\n");
+        let items: Vec<_> = doc
+            .lines
+            .iter()
+            .filter(|l| matches!(l.kind, LineKind::ListItem { depth: 1 }))
+            .collect();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn build_rule_emits_horizontal_rule_line() {
+        let doc = build_plain("---\n");
+        assert!(doc
+            .lines
+            .iter()
+            .any(|l| matches!(l.kind, LineKind::HorizontalRule)));
+    }
+
+    #[test]
+    fn build_code_block_emits_codeblock_lines_with_lang() {
+        let doc = build_plain("```rust\nfn main() {}\n```\n");
+        let has_lang = doc.lines.iter().any(|l| {
+            matches!(
+                &l.kind,
+                LineKind::CodeBlock { lang: Some(s) } if s == "rust"
+            )
+        });
+        assert!(has_lang);
     }
 }
