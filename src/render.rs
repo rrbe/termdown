@@ -357,8 +357,6 @@ use std::io::Write;
 
 /// Transmit PNG data to the terminal and cache it under `id`. The image is
 /// not displayed yet; call `place` afterwards.
-// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
-#[allow(dead_code)]
 pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()> {
     use base64::engine::general_purpose::STANDARD;
     let b64 = STANDARD.encode(png);
@@ -387,24 +385,18 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
 }
 
 /// Place previously-transmitted image `id` at the given cell coordinates.
-// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
-#[allow(dead_code)]
 pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
     write!(w, "\x1b_Ga=p,i={id},x={col},y={row},q=2;\x1b\\")
 }
 
 /// Delete a single placement of `id`. Keeps the cached image data so future
 /// `place` calls on the same id are cheap.
-// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
-#[allow(dead_code)]
 pub fn delete_placement<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
     write!(w, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")
 }
 
 /// Delete all placements and image data this client has created. Used at
 /// TUI exit to clean up the terminal.
-// TODO: remove #[allow(dead_code)] once Task 3.2 wires up ImageLifecycle
-#[allow(dead_code)]
 pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
     write!(w, "\x1b_Ga=d,d=A,q=2;\x1b\\")
 }

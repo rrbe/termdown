@@ -1,6 +1,9 @@
 //! Interactive TUI mode.
 
 mod input;
+// Task 3.3 wires ImageLifecycle into the event loop; suppress until then.
+#[allow(dead_code)]
+mod kitty;
 mod viewport;
 
 use std::io;
