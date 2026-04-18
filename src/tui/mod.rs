@@ -159,6 +159,43 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
     }
 }
 
+fn clipped_spans(line: &layout::Line, byte_start: usize, byte_end: usize) -> Vec<RSpan<'static>> {
+    let mut out: Vec<RSpan<'static>> = Vec::new();
+    let mut cursor = 0usize;
+    for span in &line.spans {
+        let (content, is_image) = match span {
+            layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
+                (content.as_str(), false)
+            }
+            layout::Span::HeadingImage { .. } => ("", true),
+        };
+        if is_image {
+            continue;
+        }
+        let span_start = cursor;
+        let span_end = cursor + content.len();
+        cursor = span_end;
+
+        // Intersect [span_start, span_end) with [byte_start, byte_end).
+        let s = span_start.max(byte_start);
+        let e = span_end.min(byte_end);
+        if s >= e {
+            continue;
+        }
+        let slice_start = s - span_start;
+        let slice_end = e - span_start;
+        let slice = &content[slice_start..slice_end];
+        // Guard: slice may start/end in the middle of a multi-byte char.
+        // For v1, wrap always breaks at char boundaries so this should hold,
+        // but be defensive: if the indices aren't at char boundaries, skip.
+        if !content.is_char_boundary(slice_start) || !content.is_char_boundary(slice_end) {
+            continue;
+        }
+        out.push(RSpan::raw(slice.to_string()));
+    }
+    out
+}
+
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::style::{Color as RColor, Style as RStyle};
@@ -172,26 +209,20 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in app.viewport.visible() {
         let logical = &app.doc.lines[vl.logical_index];
-        let mut rspans: Vec<RSpan> = Vec::new();
-        let mut image_rows: u16 = 0;
 
-        for span in &logical.spans {
-            match span {
-                layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
-                    rspans.push(RSpan::raw(content.clone()));
-                }
-                layout::Span::HeadingImage { rows, .. } => {
+        // Compute image-height expansion (only on the first visual line for the logical).
+        let is_first_visual_of_logical = vl.byte_start == 0;
+        let mut image_rows: u16 = 0;
+        if is_first_visual_of_logical {
+            for span in &logical.spans {
+                if let layout::Span::HeadingImage { rows, .. } = span {
                     image_rows = image_rows.max(*rows);
                 }
             }
         }
 
-        // Emit the (possibly mixed) rspans line first. If the logical line is
-        // a pure HeadingImage with no text, rspans is empty — that becomes a
-        // single empty RLine reserving the first image row.
+        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end);
         rendered.push(RLine::from(rspans));
-
-        // Reserve additional empty rows for the image tail.
         for _ in 1..image_rows.max(1) {
             if image_rows == 0 {
                 break;
@@ -223,16 +254,17 @@ fn progress_percent(app: &App) -> u32 {
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     let col = MARGIN_WIDTH as u16;
     let mut out = HashMap::new();
-    // Walk the same sequence `draw` walks, tracking the visual-row offset so
-    // image placements land at the same row ratatui leaves blank.
     let mut visual_row: u16 = 0;
     for vl in app.viewport.visible() {
         let logical = &app.doc.lines[vl.logical_index];
+        let is_first_visual_of_logical = vl.byte_start == 0;
         let mut image_rows: u16 = 0;
-        for span in &logical.spans {
-            if let layout::Span::HeadingImage { id, rows } = span {
-                out.insert(*id, (col, visual_row));
-                image_rows = image_rows.max(*rows);
+        if is_first_visual_of_logical {
+            for span in &logical.spans {
+                if let layout::Span::HeadingImage { id, rows } = span {
+                    out.insert(*id, (col, visual_row));
+                    image_rows = image_rows.max(*rows);
+                }
             }
         }
         if image_rows > 0 {

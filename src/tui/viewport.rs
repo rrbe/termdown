@@ -10,10 +10,7 @@ use crate::layout::{Line, RenderedDoc, Span};
 #[derive(Debug, Clone)]
 pub struct VisualLine {
     pub logical_index: usize,
-    // Task 4.4 will use these for width-aware wrap slicing.
-    #[allow(dead_code)]
     pub byte_start: usize,
-    #[allow(dead_code)]
     pub byte_end: usize,
 }
 
@@ -114,17 +111,88 @@ impl Viewport {
     }
 }
 
-fn wrap_all(lines: &[Line], _width: u16) -> Vec<VisualLine> {
-    // v1: one visual line per logical line, byte range covers full content.
-    // Task 4.4 replaces this with width-aware breaking.
+fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
+    use crate::layout::LineKind;
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+    // Reserve margin (4 cols) to match cat-mode indent.
+    let max: usize = (width as usize).saturating_sub(4);
+
     let mut out = Vec::with_capacity(lines.len());
-    for (i, line) in lines.iter().enumerate() {
-        let byte_len = line_byte_len(line);
-        out.push(VisualLine {
-            logical_index: i,
-            byte_start: 0,
-            byte_end: byte_len,
-        });
+    for (li, line) in lines.iter().enumerate() {
+        // Never-wrap kinds: one visual line each, full byte range.
+        match line.kind {
+            LineKind::Blank
+            | LineKind::HorizontalRule
+            | LineKind::Table
+            | LineKind::Heading { .. } => {
+                out.push(VisualLine {
+                    logical_index: li,
+                    byte_start: 0,
+                    byte_end: line_byte_len(line),
+                });
+                continue;
+            }
+            _ => {}
+        }
+
+        // Flatten text content for wrapping. Link content is treated as plain
+        // text; HeadingImage contributes nothing.
+        let text: String = line
+            .spans
+            .iter()
+            .filter_map(|s| match s {
+                crate::layout::Span::Text { content, .. }
+                | crate::layout::Span::Link { content, .. } => Some(content.as_str()),
+                crate::layout::Span::HeadingImage { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+
+        if max == 0 || UnicodeWidthStr::width(text.as_str()) <= max {
+            out.push(VisualLine {
+                logical_index: li,
+                byte_start: 0,
+                byte_end: text.len(),
+            });
+            continue;
+        }
+
+        // Width-aware break: accumulate per-char display width, break when
+        // next char would exceed `max`. Break at character boundaries (no
+        // word-wrap awareness in v1 — simplest correct behavior).
+        let mut byte_start = 0usize;
+        let mut cur_width = 0usize;
+        let mut cur_byte = 0usize;
+        for (i, ch) in text.char_indices() {
+            let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if cur_width + cw > max && cur_byte > byte_start {
+                out.push(VisualLine {
+                    logical_index: li,
+                    byte_start,
+                    byte_end: cur_byte,
+                });
+                byte_start = cur_byte;
+                cur_width = 0;
+            }
+            cur_byte = i + ch.len_utf8();
+            cur_width += cw;
+        }
+        // Flush tail.
+        if byte_start < text.len() {
+            out.push(VisualLine {
+                logical_index: li,
+                byte_start,
+                byte_end: text.len(),
+            });
+        } else if text.is_empty() {
+            // Empty logical line (e.g. a `Body` with no content) — emit one empty visual.
+            out.push(VisualLine {
+                logical_index: li,
+                byte_start: 0,
+                byte_end: 0,
+            });
+        }
     }
     out
 }
@@ -276,5 +344,71 @@ mod tests {
         vp.top = 0;
         vp.jump_to_prev_heading(&doc, 0);
         assert_eq!(vp.top, 0);
+    }
+
+    #[test]
+    fn wrap_splits_long_body_line() {
+        use crate::layout::{Line, LineKind, Span, Style};
+        let doc = RenderedDoc {
+            lines: vec![Line {
+                spans: vec![Span::Text {
+                    content: "alpha beta gamma delta epsilon zeta eta theta".into(),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Body,
+            }],
+            headings: vec![],
+            images: vec![],
+        };
+        let mut vp = Viewport::new(10, 20);
+        vp.ensure_wrap(&doc);
+        assert!(
+            vp.total_visual_lines() > 1,
+            "expected multiple visual lines"
+        );
+    }
+
+    #[test]
+    fn wrap_leaves_table_lines_intact() {
+        use crate::layout::{Line, LineKind, Span, Style};
+        let doc = RenderedDoc {
+            lines: vec![Line {
+                spans: vec![Span::Text {
+                    content: "col1 | col2 | col3 | col4 | col5 | col6".into(),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Table,
+            }],
+            headings: vec![],
+            images: vec![],
+        };
+        let mut vp = Viewport::new(10, 20);
+        vp.ensure_wrap(&doc);
+        assert_eq!(vp.total_visual_lines(), 1, "table lines should not wrap");
+    }
+
+    #[test]
+    fn wrap_cjk_accounts_for_double_width() {
+        use crate::layout::{Line, LineKind, Span, Style};
+        // 10 CJK characters = 20 columns of display width.
+        let content: String = "你好世界测试内容断行示例".into(); // 12 chars * 2 = 24 cols
+        let doc = RenderedDoc {
+            lines: vec![Line {
+                spans: vec![Span::Text {
+                    content: content.clone(),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Body,
+            }],
+            headings: vec![],
+            images: vec![],
+        };
+        let mut vp = Viewport::new(10, 20);
+        vp.ensure_wrap(&doc);
+        // With max width 20 - 4 (margin) = 16 cols, 24 cols should split into 2 visual lines.
+        assert!(
+            vp.total_visual_lines() >= 2,
+            "CJK content should wrap across lines"
+        );
     }
 }
