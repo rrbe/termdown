@@ -290,9 +290,56 @@ fn center_on_logical(vp: &mut Viewport, logical: usize) {
     }
 }
 
-fn clipped_spans(line: &layout::Line, byte_start: usize, byte_end: usize) -> Vec<RSpan<'static>> {
+struct VisibleMatch {
+    start: usize,
+    end: usize,
+    is_current: bool,
+}
+
+/// Collect matches overlapping `[byte_start, byte_end)` on line `logical_index`.
+/// Returns ranges in the *logical* line's byte coordinates (same space the
+/// VisualLine uses). `current_logical` is `(line_index, byte_range.start)` of
+/// the currently-focused match, if any.
+fn visible_matches_for_line(
+    search: Option<&SearchState>,
+    logical_index: usize,
+    byte_start: usize,
+    byte_end: usize,
+    current_logical: Option<(usize, usize)>,
+) -> Vec<VisibleMatch> {
+    let Some(state) = search else {
+        return Vec::new();
+    };
+    state
+        .matches
+        .iter()
+        .filter(|m| m.line_index == logical_index)
+        .filter(|m| m.byte_range.start < byte_end && m.byte_range.end > byte_start)
+        .map(|m| VisibleMatch {
+            start: m.byte_range.start,
+            end: m.byte_range.end,
+            is_current: Some((m.line_index, m.byte_range.start)) == current_logical,
+        })
+        .collect()
+}
+
+fn clipped_spans(
+    line: &layout::Line,
+    byte_start: usize,
+    byte_end: usize,
+    matches: &[VisibleMatch],
+) -> Vec<RSpan<'static>> {
+    use ratatui::style::{Color as RColor, Style as RStyle};
+
     let mut out: Vec<RSpan<'static>> = Vec::new();
     let mut cursor = 0usize;
+
+    // Highlight styles. Task 8/theme follow-up: pull from style::Colors instead.
+    let current_style = RStyle::default().bg(RColor::Yellow).fg(RColor::Black);
+    let other_style = RStyle::default()
+        .bg(RColor::Rgb(80, 80, 0))
+        .fg(RColor::White);
+
     for span in &line.spans {
         let (content, is_image) = match span {
             layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
@@ -307,22 +354,55 @@ fn clipped_spans(line: &layout::Line, byte_start: usize, byte_end: usize) -> Vec
         let span_end = cursor + content.len();
         cursor = span_end;
 
-        // Intersect [span_start, span_end) with [byte_start, byte_end).
-        let s = span_start.max(byte_start);
-        let e = span_end.min(byte_end);
-        if s >= e {
+        let clip_start = span_start.max(byte_start);
+        let clip_end = span_end.min(byte_end);
+        if clip_start >= clip_end {
             continue;
         }
-        let slice_start = s - span_start;
-        let slice_end = e - span_start;
-        let slice = &content[slice_start..slice_end];
-        // Guard: slice may start/end in the middle of a multi-byte char.
-        // For v1, wrap always breaks at char boundaries so this should hold,
-        // but be defensive: if the indices aren't at char boundaries, skip.
-        if !content.is_char_boundary(slice_start) || !content.is_char_boundary(slice_end) {
-            continue;
+
+        // Walk through the visible slice [clip_start, clip_end) emitting
+        // alternating plain/highlighted sub-strings.
+        let mut pos = clip_start;
+        while pos < clip_end {
+            // Find the next match range that contains `pos` or starts after it.
+            let next_match = matches
+                .iter()
+                .filter(|m| m.end > pos && m.start < clip_end)
+                .min_by_key(|m| m.start);
+
+            let (region_end, style) = match next_match {
+                Some(m) if m.start <= pos => {
+                    // Currently inside a match.
+                    let region_end = m.end.min(clip_end);
+                    let style = if m.is_current {
+                        current_style
+                    } else {
+                        other_style
+                    };
+                    (region_end, Some(style))
+                }
+                Some(m) => {
+                    // There's a match further ahead; emit plain text up to its start.
+                    (m.start.min(clip_end), None)
+                }
+                None => {
+                    // No more matches — emit plain text to clip_end.
+                    (clip_end, None)
+                }
+            };
+
+            let slice_start = pos - span_start;
+            let slice_end = region_end - span_start;
+            if !content.is_char_boundary(slice_start) || !content.is_char_boundary(slice_end) {
+                break; // defensive — shouldn't happen since wrap breaks at char boundaries
+            }
+            let slice = &content[slice_start..slice_end];
+            match style {
+                Some(st) => out.push(RSpan::styled(slice.to_string(), st)),
+                None => out.push(RSpan::raw(slice.to_string())),
+            }
+            pos = region_end;
         }
-        out.push(RSpan::raw(slice.to_string()));
     }
     out
 }
@@ -337,6 +417,14 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         .split(frame.area());
 
     // Body
+    // Precompute the current-match identity for "is this the current one" checks.
+    let current_logical: Option<(usize, usize)> = app.search.as_ref().and_then(|s| {
+        s.current.map(|i| {
+            let m = &s.matches[i];
+            (m.line_index, m.byte_range.start)
+        })
+    });
+
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in app.viewport.visible() {
         let logical = &app.doc.lines[vl.logical_index];
@@ -352,7 +440,14 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             }
         }
 
-        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end);
+        let matches = visible_matches_for_line(
+            app.search.as_ref(),
+            vl.logical_index,
+            vl.byte_start,
+            vl.byte_end,
+            current_logical,
+        );
+        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches);
         rendered.push(RLine::from(rspans));
         for _ in 1..image_rows.max(1) {
             if image_rows == 0 {

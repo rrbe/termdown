@@ -8,8 +8,6 @@ use crate::layout::{Line, RenderedDoc, Span};
 #[derive(Debug, Clone)]
 pub struct MatchPos {
     pub line_index: usize,
-    // Consumed in Task 5.4 (highlight rendering).
-    #[allow(dead_code)]
     pub byte_range: Range<usize>,
 }
 
