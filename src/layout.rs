@@ -101,21 +101,45 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
     let parser = Parser::new_ext(md, opts);
 
     let mut lines: Vec<Line> = Vec::new();
-    let mut current = String::new();
+    let mut spans: Vec<Span> = Vec::new();
+    let mut text_buf = String::new();
+    let mut style = Style::default();
 
     for event in parser {
         match event {
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
+                flush_text(&mut text_buf, &mut spans, &style);
                 lines.push(Line {
-                    spans: vec![Span::Text {
-                        content: std::mem::take(&mut current),
-                        style: Style::default(),
-                    }],
+                    spans: std::mem::take(&mut spans),
                     kind: LineKind::Body,
                 });
             }
-            Event::Text(t) => current.push_str(&t),
+            Event::Start(Tag::Strong) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.bold = true;
+            }
+            Event::End(TagEnd::Strong) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.bold = false;
+            }
+            Event::Start(Tag::Emphasis) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.italic = true;
+            }
+            Event::End(TagEnd::Emphasis) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.italic = false;
+            }
+            Event::Start(Tag::Strikethrough) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.strikethrough = true;
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                style.strikethrough = false;
+            }
+            Event::Text(t) => text_buf.push_str(&t),
             _ => {}
         }
     }
@@ -124,6 +148,17 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
         lines,
         headings: vec![],
         images: vec![],
+    }
+}
+
+/// Flush the pending plain-text buffer into a styled span and clear it.
+#[allow(dead_code)]
+fn flush_text(text_buf: &mut String, spans: &mut Vec<Span>, style: &Style) {
+    if !text_buf.is_empty() {
+        spans.push(Span::Text {
+            content: std::mem::take(text_buf),
+            style: style.clone(),
+        });
     }
 }
 
@@ -172,5 +207,42 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn build_inline_bold_and_italic() {
+        let doc = build_plain("hello **bold** and *it*\n");
+        let line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Body))
+            .unwrap();
+
+        let bold_span = line
+            .spans
+            .iter()
+            .find(|s| matches!(s, Span::Text { style, .. } if style.bold));
+        let italic_span = line
+            .spans
+            .iter()
+            .find(|s| matches!(s, Span::Text { style, .. } if style.italic));
+
+        assert!(matches!(bold_span, Some(Span::Text { content, .. }) if content == "bold"));
+        assert!(matches!(italic_span, Some(Span::Text { content, .. }) if content == "it"));
+    }
+
+    #[test]
+    fn build_inline_strikethrough() {
+        let doc = build_plain("keep ~~drop~~ go\n");
+        let line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Body))
+            .unwrap();
+        let strike = line
+            .spans
+            .iter()
+            .find(|s| matches!(s, Span::Text { style, .. } if style.strikethrough));
+        assert!(matches!(strike, Some(Span::Text { content, .. }) if content == "drop"));
     }
 }
