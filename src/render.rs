@@ -270,7 +270,16 @@ fn draw_raster_glyph(
 
 /// Render heading text to a PNG image. Returns `None` if font loading or
 /// PNG encoding fails (caller should fall back to ANSI text).
-pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> Option<Vec<u8>> {
+///
+/// Returns the PNG bytes and the image's pixel dimensions `(width, height)`.
+/// The TUI needs the pixel height to compute how many terminal rows the image
+/// occupies (`ceil(height / cell_pixel_height)`); cat mode ignores it.
+pub fn render_heading(
+    text: &str,
+    level: u8,
+    config: &Config,
+    theme: Theme,
+) -> Option<(Vec<u8>, u32, u32)> {
     let st = style::heading_style(level, theme);
     let fonts = font::get_fonts(level, config)?;
     let scale = PxScale {
@@ -306,7 +315,7 @@ pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> O
     PngEncoder::new(&mut buf)
         .write_image(img.as_raw(), img_w, img_h, image::ExtendedColorType::Rgba8)
         .ok()?;
-    Some(buf)
+    Some((buf, img_w, img_h))
 }
 
 // ─── Kitty Graphics Protocol ────────────────────────────────────────────────
@@ -388,11 +397,17 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
 /// Moves the cursor explicitly because Kitty's `a=p` places at the current
 /// cursor position; the `x` and `y` APC keys are source-image pixel offsets
 /// (for cropping), not terminal cell coordinates.
+///
+/// The `C=1` flag tells Kitty to NOT advance the cursor after placement.
+/// Without it, placing a tall image near the bottom of the screen would
+/// push the cursor past the last row, causing the terminal to scroll the
+/// entire visible region upward — this snowballs across frames and
+/// produces the "status bar creeps upward on each scroll" failure.
 pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
     // CUP (cursor position) is 1-indexed: row+1, col+1.
     write!(
         w,
-        "\x1b[{};{}H\x1b_Ga=p,i={id},q=2;\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={id},C=1,q=2;\x1b\\",
         row + 1,
         col + 1
     )
@@ -415,6 +430,12 @@ pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
 /// PNG data + cell dimensions for a rendered heading image.
 /// Stored by id in `RenderedDoc` and transmitted to the terminal
 /// once per TUI session (or emitted directly in cat mode).
+///
+/// `rows` is the number of terminal cell rows the image occupies. This is
+/// a conservative estimate at layout time (based on heading level) and is
+/// refined by `tui::mod::refine_image_rows` once the real terminal cell
+/// pixel height is known. `px_height` preserves the exact PNG height so
+/// the refinement step can compute `ceil(px_height / cell_pixel_height)`.
 // TODO: remove #[allow(dead_code)] once Task 1.5 wires up image production
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -423,6 +444,8 @@ pub struct HeadingImage {
     pub png: Vec<u8>,
     pub cols: u16,
     pub rows: u16,
+    pub px_width: u32,
+    pub px_height: u32,
 }
 
 #[cfg(test)]
@@ -461,8 +484,9 @@ mod kitty_tests {
         let mut buf = Vec::new();
         place(&mut buf, 7, 3, 5).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        // Cursor move is 1-indexed (row+1, col+1), then place by id.
-        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,q=2;\x1b\\");
+        // Cursor move is 1-indexed (row+1, col+1), then place by id with
+        // C=1 so kitty doesn't advance the cursor after placement.
+        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,C=1,q=2;\x1b\\");
     }
 
     #[test]

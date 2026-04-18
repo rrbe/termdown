@@ -150,9 +150,11 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
 
                 let (id_for_kind, heading_spans): (Option<u32>, Vec<Span>) = if heading_level <= 3 {
                     match crate::render::render_heading(&text, heading_level, config, theme) {
-                        Some(png) => {
+                        Some((png, px_width, px_height)) => {
                             let id = next_image_id;
                             next_image_id += 1;
+                            // Conservative row estimate; refined by the TUI
+                            // once the real terminal cell pixel height is known.
                             let rows = match heading_level {
                                 1 => 6,
                                 2 => 4,
@@ -163,6 +165,8 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                                 png,
                                 cols: 0,
                                 rows,
+                                px_width,
+                                px_height,
                             });
                             (Some(id), vec![Span::HeadingImage { id, rows }])
                         }

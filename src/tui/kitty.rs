@@ -78,6 +78,19 @@ impl ImageLifecycle {
         self.transmitted.clear();
         Ok(())
     }
+
+    /// Delete all current placements (keeping cached image data so they can
+    /// be re-placed without re-transmitting). Resets `placed` tracking so
+    /// the next `sync` treats every desired image as new and emits a fresh
+    /// place command. Used after `terminal.clear()` to force all images to
+    /// re-render from scratch while avoiding an expensive PNG retransmit.
+    pub fn reset_placements<W: Write>(&mut self, w: &mut W) -> io::Result<()> {
+        for &id in self.placed.keys() {
+            render::delete_placement(w, id)?;
+        }
+        self.placed.clear();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

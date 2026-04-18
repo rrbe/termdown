@@ -66,6 +66,15 @@ struct App {
     should_quit: bool,
     config: crate::config::Config,
     theme: crate::theme::Theme,
+    /// Terminal cell pixel height (reported by the OS). Used to compute real
+    /// row counts for heading images. 0 means unknown — callers fall back to
+    /// conservative per-level estimates.
+    cell_px_height: u32,
+    /// Next `event_loop` iteration should force a full-screen clear and
+    /// redraw (text + kitty placements). Set whenever state changes in a way
+    /// that may leave stale terminal cells behind (scroll, toc toggle, doc
+    /// switch, resize).
+    needs_full_redraw: bool,
 }
 
 impl App {
@@ -89,6 +98,8 @@ impl App {
             should_quit: false,
             config,
             theme,
+            cell_px_height: 0,
+            needs_full_redraw: true,
         };
         app.push_new_doc(path, doc);
         app
@@ -136,7 +147,7 @@ impl App {
         }
         let (width, height) = self.term_size;
         let viewport = Viewport::new(height, width);
-        let entry = DocEntry {
+        let mut entry = DocEntry {
             path,
             doc,
             viewport,
@@ -144,6 +155,9 @@ impl App {
             pending_g: false,
             toc_open: false,
         };
+        // Refine image row estimates now that (a) the doc is populated and
+        // (b) we may already know the real terminal cell pixel height.
+        refine_image_rows(&mut entry.doc, self.cell_px_height);
         self.docs.push(entry);
         self.docs.len() - 1
     }
@@ -226,6 +240,17 @@ fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) 
     let size = terminal.size()?;
     let body_height = size.height.saturating_sub(1);
     let mut app = App::new_with_initial_doc(path, doc, body_height, size.width, config, theme);
+    // Query the real terminal cell pixel height up-front so heading image
+    // `rows` estimates are accurate from the first frame onward. If the OS
+    // doesn't report it, `cell_px_height` stays 0 and we keep per-level
+    // fallbacks from layout.
+    app.cell_px_height = query_cell_px_height();
+    if app.cell_px_height > 0 {
+        // Refine the already-pushed initial doc now that we know the real
+        // cell pixel height (push_new_doc ran with `cell_px_height = 0`).
+        let h = app.cell_px_height;
+        refine_image_rows(&mut app.docs[0].doc, h);
+    }
 
     // Transmit all heading PNGs once; subsequent frames only emit placement commands.
     {
@@ -250,10 +275,40 @@ fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) 
 
 fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
     loop {
+        // Sync viewport dimensions to the current terminal size. Handles
+        // initial startup and terminal resizes. Any change invalidates the
+        // wrap cache (`ensure_wrap` re-wraps when `self.width != cache_width`).
+        let size = terminal.size()?;
+        let body_height = size.height.saturating_sub(1);
+        let body_width = if app.active().toc_open {
+            size.width.saturating_sub(30)
+        } else {
+            size.width
+        };
+        app.term_size = (size.width, body_height);
         {
             let active = app.active_mut();
+            if active.viewport.width != body_width || active.viewport.height != body_height {
+                active.viewport.width = body_width;
+                active.viewport.height = body_height;
+                // width change implicitly invalidates wrap via ensure_wrap's
+                // cache_width comparison.
+            }
             active.viewport.ensure_wrap(&active.doc);
         }
+
+        // Force a full redraw if state changed in a way that may leave
+        // stale cells behind. Clears text cells, deletes all kitty
+        // placements (keeping cached image data), and resets our
+        // placement tracking so `sync` re-emits every visible image.
+        if app.needs_full_redraw {
+            terminal.clear()?;
+            let mut out = io::stdout().lock();
+            let _ = app.images.reset_placements(&mut out);
+            let _ = out.flush();
+            app.needs_full_redraw = false;
+        }
+
         terminal.draw(|frame| draw(frame, app))?;
 
         {
@@ -263,8 +318,14 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             let _ = stdout.flush();
         }
 
-        if event::poll(Duration::from_millis(16))? {
+        if event::poll(Duration::from_millis(50))? {
             let ev = event::read()?;
+            // Resize is the one event crossterm surfaces that must trigger a
+            // full redraw regardless of mode.
+            if matches!(ev, Event::Resize(_, _)) {
+                app.needs_full_redraw = true;
+                continue;
+            }
             match &mut app.mode {
                 Mode::Normal => handle_normal_key(app, &ev)?,
                 Mode::Search { .. } => handle_search_key(app, ev)?,
@@ -273,6 +334,14 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             if app.should_quit {
                 return Ok(());
             }
+            // Every processed event is potentially state-changing. Force a
+            // full clear+redraw next iteration. This is heavier than an
+            // incremental diff, but it's the only way to guarantee that
+            // terminal cells previously obscured by kitty image pixels get
+            // re-painted and stale cells from prior frames don't leak
+            // through ratatui's diff-based rendering. 60fps flicker is not
+            // a concern since we only redraw on user input.
+            app.needs_full_redraw = true;
         }
     }
 }
@@ -344,15 +413,10 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             input::Action::ToggleToc => {
                 let active = app.active_mut();
                 active.toc_open = !active.toc_open;
-                // Recompute viewport width for the new body area.
-                let new_width = if active.toc_open {
-                    active.viewport.width.saturating_sub(30)
-                } else {
-                    active.viewport.width.saturating_add(30)
-                };
-                active.viewport.width = new_width;
-                // ensure_wrap keys on `cache_width == self.width`; changing width
-                // invalidates the cache so the next frame re-wraps correctly.
+                // viewport.width is re-synced from terminal size at the top
+                // of every event_loop iteration, so we don't need to adjust
+                // it here — the next iteration picks up the new body width
+                // and `ensure_wrap` re-wraps once cache_width drifts.
             }
             input::Action::Back => {
                 if let Some(prev) = app.history.pop() {
@@ -699,6 +763,13 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         })
     });
 
+    // Every body row is prefixed with this margin so TUI indentation matches
+    // cat mode's 4-col gutter. Without it, text starts at column 0 of the
+    // body area, clashing visually with heading images (which are placed at
+    // the MARGIN_WIDTH column offset to align with cat mode's output).
+    let margin = " ".repeat(MARGIN_WIDTH);
+    let margin_span = RSpan::raw(margin);
+
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in active.viewport.visible() {
         let logical = &active.doc.lines[vl.logical_index];
@@ -722,7 +793,10 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             current_logical,
         );
         let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches);
-        rendered.push(RLine::from(rspans));
+        let mut full_spans: Vec<RSpan> = Vec::with_capacity(rspans.len() + 1);
+        full_spans.push(margin_span.clone());
+        full_spans.extend(rspans);
+        rendered.push(RLine::from(full_spans));
         for _ in 1..image_rows.max(1) {
             if image_rows == 0 {
                 break;
@@ -814,6 +888,44 @@ fn progress_percent(app: &App) -> u32 {
     }
     let pos = (vp.top as f64 + vp.height as f64).min(total);
     ((pos / total) * 100.0).round() as u32
+}
+
+/// Query the terminal for its cell pixel height. Returns 0 if the OS or
+/// terminal doesn't report it (per crossterm docs: "may not be reliably
+/// implemented or default to 0").
+fn query_cell_px_height() -> u32 {
+    match crossterm::terminal::window_size() {
+        Ok(ws) if ws.rows > 0 && ws.height > 0 => (ws.height as u32) / (ws.rows as u32),
+        _ => 0,
+    }
+}
+
+/// Refine image `rows` fields on every `HeadingImage` and every
+/// `Span::HeadingImage` in `doc` to match the real terminal cell pixel
+/// height. When `cell_px_height` is 0 (unknown), keeps the conservative
+/// estimate set by layout.
+fn refine_image_rows(doc: &mut layout::RenderedDoc, cell_px_height: u32) {
+    if cell_px_height == 0 {
+        return;
+    }
+    // Build id → real_rows map from doc.images' pixel heights.
+    let mut real_rows: HashMap<u32, u16> = HashMap::new();
+    for img in &mut doc.images {
+        let r = img.px_height.div_ceil(cell_px_height).max(1) as u16;
+        img.rows = r;
+        real_rows.insert(img.id, r);
+    }
+    // Propagate to each `Span::HeadingImage` so `draw()` and
+    // `desired_image_placements()` see the same row count.
+    for line in &mut doc.lines {
+        for span in &mut line.spans {
+            if let layout::Span::HeadingImage { id, rows } = span {
+                if let Some(&r) = real_rows.get(id) {
+                    *rows = r;
+                }
+            }
+        }
+    }
 }
 
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
