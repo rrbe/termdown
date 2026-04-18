@@ -346,3 +346,17 @@ pub fn kitty_display(png: &[u8]) -> String {
 
     out
 }
+
+// ─── Shared Image Record ────────────────────────────────────────────────────
+
+/// PNG data + cell dimensions for a rendered heading image.
+/// Stored by id in `RenderedDoc` and transmitted to the terminal
+/// once per TUI session (or emitted directly in cat mode).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct HeadingImage {
+    pub id: u32,
+    pub png: Vec<u8>,
+    pub cols: u16,
+    pub rows: u16,
+}
