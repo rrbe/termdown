@@ -104,6 +104,7 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
     let mut spans: Vec<Span> = Vec::new();
     let mut text_buf = String::new();
     let mut style = Style::default();
+    let mut pending_link_url: Option<String> = None;
 
     for event in parser {
         match event {
@@ -138,6 +139,30 @@ pub fn build(md: &str, _config: &Config, _theme: Theme) -> RenderedDoc {
             Event::End(TagEnd::Strikethrough) => {
                 flush_text(&mut text_buf, &mut spans, &style);
                 style.strikethrough = false;
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                pending_link_url = Some(dest_url.to_string());
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(url) = pending_link_url.take() {
+                    let content = std::mem::take(&mut text_buf);
+                    spans.push(Span::Link {
+                        content,
+                        url,
+                        style: style.clone(),
+                    });
+                }
+            }
+            Event::Code(code) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                let mut code_style = style.clone();
+                code_style.bg = Some(Color::Indexed(236));
+                code_style.fg = Some(Color::Indexed(213));
+                spans.push(Span::Text {
+                    content: code.to_string(),
+                    style: code_style,
+                });
             }
             Event::Text(t) => text_buf.push_str(&t),
             _ => {}
@@ -244,5 +269,35 @@ mod tests {
             .iter()
             .find(|s| matches!(s, Span::Text { style, .. } if style.strikethrough));
         assert!(matches!(strike, Some(Span::Text { content, .. }) if content == "drop"));
+    }
+
+    #[test]
+    fn build_link_becomes_link_span() {
+        let doc = build_plain("see [docs](https://example.com) now\n");
+        let line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Body))
+            .unwrap();
+        let link = line.spans.iter().find_map(|s| match s {
+            Span::Link { content, url, .. } => Some((content.clone(), url.clone())),
+            _ => None,
+        });
+        assert_eq!(link, Some(("docs".into(), "https://example.com".into())));
+    }
+
+    #[test]
+    fn build_inline_code_has_styled_bg() {
+        let doc = build_plain("run `ls` now\n");
+        let line = doc
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, LineKind::Body))
+            .unwrap();
+        let code = line.spans.iter().find_map(|s| match s {
+            Span::Text { content, style } if content == "ls" && style.bg.is_some() => Some(()),
+            _ => None,
+        });
+        assert!(code.is_some());
     }
 }
