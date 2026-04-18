@@ -55,6 +55,35 @@ termdown --help
 termdown --version
 ```
 
+### TUI mode
+
+For long files, use `--tui` for a vim-style interactive browser:
+
+```sh
+termdown --tui README.md
+```
+
+Key bindings:
+
+| Key | Action |
+|---|---|
+| `j` / `↓` | Scroll down one line |
+| `k` / `↑` | Scroll up one line |
+| `d` / `u` | Half page down / up |
+| `f` / `Space` / `PgDn` | Full page down |
+| `b` / `PgUp` | Full page up |
+| `gg` / `G` | Jump to start / end |
+| `]` / `[` | Next / previous heading |
+| `t` | Toggle Table of Contents panel |
+| `/` | Search forward |
+| `?` | Search backward |
+| `n` / `N` | Next / previous match |
+| `Enter` | Follow link (overlay picker if multiple visible) |
+| `o` / `i` | Back / forward across followed `.md` links |
+| `q` / `Ctrl-C` | Quit |
+
+TUI mode requires a file path; stdin input is not supported.
+
 ## Configuration
 
 termdown reads configuration from `~/.termdown/config.toml`.
