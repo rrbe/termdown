@@ -1,3 +1,9 @@
+// This module is slated for removal in Task 1.10. `main.rs` already routes
+// through `layout::build` + `cat::print`. Everything here is kept behind
+// `#[allow(dead_code)]` until the removal so tests can keep importing the
+// in-place `#[cfg(test)]` helpers (which move in Task 1.10).
+#![allow(dead_code)]
+
 use std::io::{self, Write};
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};

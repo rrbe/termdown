@@ -4,11 +4,6 @@ use crate::config::Config;
 use crate::render::HeadingImage;
 use crate::theme::Theme;
 
-// The following items are scaffolding for the TUI pipeline introduced in Task 1.1.
-// Each #[allow(dead_code)] is intentionally temporary and should be removed as the
-// corresponding consumer task wires it up (Task 1.2+ for layout/rendering consumers).
-
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedDoc {
     pub lines: Vec<Line>,
@@ -16,14 +11,12 @@ pub struct RenderedDoc {
     pub images: Vec<HeadingImage>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Line {
     pub spans: Vec<Span>,
     pub kind: LineKind,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineKind {
     Body,
@@ -45,7 +38,6 @@ pub enum LineKind {
     Blank,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Span {
     Text {
@@ -63,7 +55,6 @@ pub enum Span {
     },
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Style {
     pub fg: Option<Color>,
@@ -75,16 +66,15 @@ pub struct Style {
     pub dim: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     /// 256-color index (what the existing style.rs already emits).
     Indexed(u8),
     /// Truecolor fallback for future use.
+    #[allow(dead_code)] // Reserved for TUI pipeline.
     Rgb(u8, u8, u8),
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadingEntry {
     pub level: u8,
@@ -92,13 +82,11 @@ pub struct HeadingEntry {
     pub line_index: usize,
 }
 
-#[allow(dead_code)]
 struct ListState {
     ordered: bool,
     counter: u64,
 }
 
-#[allow(dead_code)] // TODO: removed in Task 1.9 once main.rs consumes this
 pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -123,10 +111,25 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut current_row: Vec<Vec<Span>> = Vec::new();
     let mut in_table_header = false;
     let mut image_url: Option<String> = None;
+    let mut in_html_block = false;
+    let mut html_block_lines: Vec<String> = Vec::new();
+    let mut in_item = false;
+
+    // Helper to decide whether a blank line is needed before the next block.
+    // Returns true if a blank separator should be emitted.
+    fn push_block_gap(lines: &mut Vec<Line>) {
+        if !lines.is_empty() && !matches!(lines.last().map(|l| &l.kind), Some(LineKind::Blank)) {
+            lines.push(Line {
+                spans: vec![],
+                kind: LineKind::Blank,
+            });
+        }
+    }
 
     for event in parser {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
+                push_block_gap(&mut lines);
                 heading_level = match level {
                     pulldown_cmark::HeadingLevel::H1 => 1,
                     pulldown_cmark::HeadingLevel::H2 => 2,
@@ -196,18 +199,27 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                 });
                 heading_level = 0;
             }
-            Event::Start(Tag::Paragraph) => {}
+            Event::Start(Tag::Paragraph) => {
+                if quote_depth == 0 && !in_item {
+                    push_block_gap(&mut lines);
+                }
+            }
             Event::End(TagEnd::Paragraph) => {
                 flush_text(&mut text_buf, &mut spans, &style);
                 let kind = if quote_depth > 0 {
                     LineKind::BlockQuote { depth: quote_depth }
+                } else if in_item {
+                    let depth = list_stack.len() as u8;
+                    LineKind::ListItem { depth }
                 } else {
                     LineKind::Body
                 };
-                lines.push(Line {
-                    spans: std::mem::take(&mut spans),
-                    kind,
-                });
+                if !spans.is_empty() {
+                    lines.push(Line {
+                        spans: std::mem::take(&mut spans),
+                        kind,
+                    });
+                }
             }
             Event::Start(Tag::Strong) => {
                 flush_text(&mut text_buf, &mut spans, &style);
@@ -252,8 +264,11 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                 let mut code_style = style.clone();
                 code_style.bg = Some(Color::Indexed(236));
                 code_style.fg = Some(Color::Indexed(213));
+                // Mirror the legacy renderer, which padded inline code with one
+                // space on each side so the colored background isn't flush against
+                // surrounding text.
                 spans.push(Span::Text {
-                    content: code.to_string(),
+                    content: format!(" {code} "),
                     style: code_style,
                 });
             }
@@ -274,10 +289,29 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                     text_buf.push_str(&t);
                 }
             }
-            Event::Start(Tag::BlockQuote(..)) => quote_depth += 1,
+            Event::Start(Tag::BlockQuote(..)) => {
+                if quote_depth == 0 {
+                    push_block_gap(&mut lines);
+                }
+                quote_depth += 1;
+            }
             Event::End(TagEnd::BlockQuote(..)) => quote_depth = quote_depth.saturating_sub(1),
 
             Event::Start(Tag::List(start)) => {
+                if list_stack.is_empty() && !in_item {
+                    push_block_gap(&mut lines);
+                } else if in_item {
+                    // Nested list: flush the current parent-item prefix+content
+                    // as its own ListItem line before emitting the sublist.
+                    flush_text(&mut text_buf, &mut spans, &style);
+                    if !spans.is_empty() {
+                        let depth = list_stack.len() as u8;
+                        lines.push(Line {
+                            spans: std::mem::take(&mut spans),
+                            kind: LineKind::ListItem { depth },
+                        });
+                    }
+                }
                 list_stack.push(ListState {
                     ordered: start.is_some(),
                     counter: start.unwrap_or(1),
@@ -288,18 +322,49 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             }
 
             Event::Start(Tag::Item) => {
-                // New item: clear any prior span accumulator so item content starts clean.
+                in_item = true;
+                // Reset the per-item buffer and seed it with the marker that this
+                // item needs (bullet or number). Indentation is baked in so
+                // cat.rs only needs to append a margin.
+                spans.clear();
+                text_buf.clear();
+                let depth = list_stack.len();
+                let indent = "  ".repeat(depth);
+                if let Some(state) = list_stack.last_mut() {
+                    if state.ordered {
+                        text_buf.push_str(&format!("{indent}{}. ", state.counter));
+                        state.counter += 1;
+                    } else {
+                        text_buf.push_str(&format!("{indent}\u{2022} "));
+                    }
+                }
             }
             Event::End(TagEnd::Item) => {
                 flush_text(&mut text_buf, &mut spans, &style);
                 let depth = list_stack.len() as u8;
-                lines.push(Line {
-                    spans: std::mem::take(&mut spans),
-                    kind: LineKind::ListItem { depth },
-                });
+                // If `spans` only contains the bullet/number marker we originally
+                // seeded, that means the item was entirely consumed by a nested
+                // list (which already emitted its own parent line). Skip the
+                // phantom empty line in that case.
+                let only_marker = spans.len() == 1
+                    && matches!(
+                        &spans[0],
+                        Span::Text { content, .. } if content.trim_end().ends_with('.')
+                            || content.trim_end().ends_with('\u{2022}')
+                    );
+                if !spans.is_empty() && !only_marker {
+                    lines.push(Line {
+                        spans: std::mem::take(&mut spans),
+                        kind: LineKind::ListItem { depth },
+                    });
+                } else {
+                    spans.clear();
+                }
+                in_item = false;
             }
 
             Event::Start(Tag::CodeBlock(kind)) => {
+                push_block_gap(&mut lines);
                 let lang = match kind {
                     pulldown_cmark::CodeBlockKind::Fenced(s) if !s.is_empty() => {
                         Some(s.to_string())
@@ -313,6 +378,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             }
 
             Event::Rule => {
+                push_block_gap(&mut lines);
                 lines.push(Line {
                     spans: vec![],
                     kind: LineKind::HorizontalRule,
@@ -321,6 +387,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
 
             // Tables
             Event::Start(Tag::Table(..)) => {
+                push_block_gap(&mut lines);
                 table_rows.clear();
                 in_table_header = false;
             }
@@ -344,6 +411,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             }
             Event::Start(Tag::TableCell) => {
                 spans.clear();
+                text_buf.clear();
             }
             Event::End(TagEnd::TableCell) => {
                 flush_text(&mut text_buf, &mut spans, &style);
@@ -381,25 +449,31 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                 });
             }
 
-            // Task list marker
+            // Task list marker: replace the bullet that Start(Item) seeded with
+            // the task-box marker, following glow's style.
             Event::TaskListMarker(checked) => {
                 let marker = if checked { "[\u{2713}] " } else { "[ ] " };
-                if spans.is_empty() && text_buf.is_empty() {
-                    text_buf.push_str(marker);
-                } else if let Some(Span::Text { content, .. }) = spans.first_mut() {
-                    *content = format!("{marker}{content}");
-                } else {
-                    text_buf = format!("{marker}{text_buf}");
+                if let Some(pos) = text_buf.rfind('\u{2022}') {
+                    let end = pos + '\u{2022}'.len_utf8() + " ".len();
+                    text_buf.replace_range(pos..end, marker);
                 }
             }
 
-            // HTML (block and inline)
-            Event::Html(s) => {
+            // HTML block — buffer lines, strip comments, then emit each non-empty
+            // line as a dim Body line.
+            Event::Start(Tag::HtmlBlock) => {
+                push_block_gap(&mut lines);
+                in_html_block = true;
+                html_block_lines.clear();
+            }
+            Event::End(TagEnd::HtmlBlock) => {
+                let joined = html_block_lines.join("\n");
+                let stripped = strip_html_comments(&joined);
                 let dim_style = Style {
                     dim: true,
                     ..Style::default()
                 };
-                for line in s.lines() {
+                for line in stripped.lines().filter(|l| !l.trim().is_empty()) {
                     lines.push(Line {
                         spans: vec![Span::Text {
                             content: line.to_string(),
@@ -408,17 +482,119 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                         kind: LineKind::Body,
                     });
                 }
+                in_html_block = false;
+                html_block_lines.clear();
             }
-            Event::InlineHtml(s) => {
-                text_buf.push_str(&s);
+            Event::Html(s) => {
+                if in_html_block {
+                    for line in s.lines() {
+                        html_block_lines.push(line.to_string());
+                    }
+                } else {
+                    // Orphan block-ish HTML outside an HtmlBlock tag pair.
+                    // Treat like the legacy renderer and emit dim Body lines.
+                    let dim_style = Style {
+                        dim: true,
+                        ..Style::default()
+                    };
+                    for line in s.lines() {
+                        lines.push(Line {
+                            spans: vec![Span::Text {
+                                content: line.to_string(),
+                                style: dim_style.clone(),
+                            }],
+                            kind: LineKind::Body,
+                        });
+                    }
+                }
             }
 
-            // Breaks
+            // Inline HTML — interpret the common formatting tags (<b>, <i>, <u>,
+            // <s>/<del>/<strike>, <code>/<kbd>), handle `<br/>` / `<hr/>`, and
+            // drop everything else (comments, unknown tags, DOCTYPE, <?xml?>…).
+            Event::InlineHtml(s) => match parse_html_fragment(&s) {
+                HtmlFragment::Comment | HtmlFragment::Other => {}
+                HtmlFragment::SelfClose { name } => {
+                    if name.eq_ignore_ascii_case("br") {
+                        // Flush what we have as its own line in the current block.
+                        flush_text(&mut text_buf, &mut spans, &style);
+                        let kind = if quote_depth > 0 {
+                            LineKind::BlockQuote { depth: quote_depth }
+                        } else if in_item {
+                            let depth = list_stack.len() as u8;
+                            LineKind::ListItem { depth }
+                        } else {
+                            LineKind::Body
+                        };
+                        if !spans.is_empty() {
+                            lines.push(Line {
+                                spans: std::mem::take(&mut spans),
+                                kind,
+                            });
+                        }
+                    } else if name.eq_ignore_ascii_case("hr") {
+                        flush_text(&mut text_buf, &mut spans, &style);
+                        if !spans.is_empty() {
+                            let kind = if quote_depth > 0 {
+                                LineKind::BlockQuote { depth: quote_depth }
+                            } else {
+                                LineKind::Body
+                            };
+                            lines.push(Line {
+                                spans: std::mem::take(&mut spans),
+                                kind,
+                            });
+                        }
+                        lines.push(Line {
+                            spans: vec![],
+                            kind: LineKind::HorizontalRule,
+                        });
+                    }
+                }
+                HtmlFragment::Open { name } => {
+                    if heading_level == 0 {
+                        apply_inline_tag_on(&mut text_buf, &mut spans, &mut style, name);
+                    }
+                }
+                HtmlFragment::Close { name } => {
+                    if heading_level == 0 {
+                        apply_inline_tag_off(&mut text_buf, &mut spans, &mut style, name);
+                    }
+                }
+            },
+
+            // Breaks — a SoftBreak or HardBreak inside a paragraph flushes the
+            // accumulated line as a new Body/Quote/ListItem line (mirrors the
+            // legacy `flush_line` behavior).
             Event::SoftBreak | Event::HardBreak => {
                 if heading_level > 0 {
                     heading_text.push(' ');
+                } else if in_code_block.is_some() {
+                    // no-op — the Text event already split on newlines.
                 } else {
-                    text_buf.push(' ');
+                    flush_text(&mut text_buf, &mut spans, &style);
+                    let kind = if quote_depth > 0 {
+                        LineKind::BlockQuote { depth: quote_depth }
+                    } else if in_item {
+                        let depth = list_stack.len() as u8;
+                        LineKind::ListItem { depth }
+                    } else {
+                        LineKind::Body
+                    };
+                    if !spans.is_empty() {
+                        lines.push(Line {
+                            spans: std::mem::take(&mut spans),
+                            kind,
+                        });
+                    }
+                    // If we're inside a list item, indent the continuation so
+                    // the next line lines up under the content column (after
+                    // the bullet/number marker).
+                    if in_item {
+                        let depth = list_stack.len();
+                        let indent = "  ".repeat(depth);
+                        text_buf.push_str(&format!("{indent}  "));
+                    }
                 }
             }
 
@@ -433,10 +609,158 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     }
 }
 
+// ─── Inline HTML helpers ────────────────────────────────────────────────────
+
+enum HtmlFragment<'a> {
+    Comment,
+    Open { name: &'a str },
+    Close { name: &'a str },
+    SelfClose { name: &'a str },
+    Other,
+}
+
+fn html_tag_name(s: &str) -> &str {
+    let end = s
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(s.len());
+    &s[..end]
+}
+
+fn parse_html_fragment(s: &str) -> HtmlFragment<'_> {
+    let s = s.trim();
+    if !s.starts_with('<') || !s.ends_with('>') {
+        return HtmlFragment::Other;
+    }
+    if s.starts_with("<!--") {
+        return HtmlFragment::Comment;
+    }
+    if s.starts_with("<!") || s.starts_with("<?") {
+        return HtmlFragment::Other;
+    }
+    if let Some(inner) = s.strip_prefix("</").and_then(|v| v.strip_suffix('>')) {
+        let name = html_tag_name(inner);
+        if name.is_empty() {
+            return HtmlFragment::Other;
+        }
+        return HtmlFragment::Close { name };
+    }
+    let inner = &s[1..s.len() - 1];
+    let (inner, self_close) = match inner.strip_suffix('/') {
+        Some(i) => (i.trim_end(), true),
+        None => (inner, false),
+    };
+    let name = html_tag_name(inner);
+    if name.is_empty() {
+        return HtmlFragment::Other;
+    }
+    if self_close {
+        HtmlFragment::SelfClose { name }
+    } else {
+        HtmlFragment::Open { name }
+    }
+}
+
+/// Apply an `<open>` inline-HTML tag, converting known formatting tags to a
+/// style change on the running `style`. Unknown tags are silently dropped —
+/// matching the legacy renderer's behavior of stripping unsupported HTML.
+fn apply_inline_tag_on(
+    text_buf: &mut String,
+    spans: &mut Vec<Span>,
+    style: &mut Style,
+    name: &str,
+) {
+    let n = name.to_ascii_lowercase();
+    match n.as_str() {
+        "b" | "strong" => {
+            flush_text(text_buf, spans, style);
+            style.bold = true;
+        }
+        "i" | "em" => {
+            flush_text(text_buf, spans, style);
+            style.italic = true;
+        }
+        "u" => {
+            flush_text(text_buf, spans, style);
+            style.underline = true;
+        }
+        "s" | "del" | "strike" => {
+            flush_text(text_buf, spans, style);
+            style.strikethrough = true;
+        }
+        "code" | "kbd" => {
+            flush_text(text_buf, spans, style);
+            // Emit a zero-length styled span marker by pushing an empty span
+            // with the code style; subsequent Text events accumulate into
+            // text_buf under the code style.
+            *style = Style {
+                bg: Some(Color::Indexed(236)),
+                fg: Some(Color::Indexed(213)),
+                ..style.clone()
+            };
+            // Add opening padding space (matches legacy "{code_bg}{code_fg} ...")
+            text_buf.push(' ');
+        }
+        _ => {}
+    }
+}
+
+fn apply_inline_tag_off(
+    text_buf: &mut String,
+    spans: &mut Vec<Span>,
+    style: &mut Style,
+    name: &str,
+) {
+    let n = name.to_ascii_lowercase();
+    match n.as_str() {
+        "b" | "strong" => {
+            flush_text(text_buf, spans, style);
+            style.bold = false;
+        }
+        "i" | "em" => {
+            flush_text(text_buf, spans, style);
+            style.italic = false;
+        }
+        "u" => {
+            flush_text(text_buf, spans, style);
+            style.underline = false;
+        }
+        "s" | "del" | "strike" => {
+            flush_text(text_buf, spans, style);
+            style.strikethrough = false;
+        }
+        "code" | "kbd" => {
+            // Trailing space closes the padded code region.
+            text_buf.push(' ');
+            flush_text(text_buf, spans, style);
+            style.bg = None;
+            style.fg = None;
+        }
+        _ => {}
+    }
+}
+
+/// Remove `<!-- ... -->` spans from `s`, including spans that cross newlines.
+/// Unterminated comments drop the tail of the input.
+fn strip_html_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        match rest[start + 4..].find("-->") {
+            Some(end) => rest = &rest[start + 4 + end + 3..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Render accumulated table rows into `LineKind::Table` lines with padding and separators.
 /// Keeps the margin-less column layout the existing cat mode produces — the outer
 /// "    " margin is added by `cat.rs`.
-#[allow(dead_code)]
 fn emit_table(lines: &mut Vec<Line>, rows: &[Vec<Vec<Span>>]) {
     if rows.is_empty() {
         return;
@@ -509,18 +833,15 @@ fn emit_table(lines: &mut Vec<Line>, rows: &[Vec<Vec<Span>>]) {
     }
 }
 
-#[allow(dead_code)]
 fn plain_width(span: &Span) -> usize {
-    use unicode_width::UnicodeWidthStr;
     match span {
         Span::Text { content, .. } | Span::Link { content, .. } => {
-            UnicodeWidthStr::width(content.as_str())
+            crate::style::display_width(content)
         }
         Span::HeadingImage { .. } => 0,
     }
 }
 
-#[allow(dead_code)]
 fn spans_plain_text_inline(spans: &[Span]) -> String {
     let mut s = String::new();
     for sp in spans {
@@ -533,7 +854,6 @@ fn spans_plain_text_inline(spans: &[Span]) -> String {
 }
 
 /// Flush the pending plain-text buffer into a styled span and clear it.
-#[allow(dead_code)]
 fn flush_text(text_buf: &mut String, spans: &mut Vec<Span>, style: &Style) {
     if !text_buf.is_empty() {
         spans.push(Span::Text {
@@ -651,7 +971,11 @@ mod tests {
             .find(|l| matches!(l.kind, LineKind::Body))
             .unwrap();
         let code = line.spans.iter().find_map(|s| match s {
-            Span::Text { content, style } if content == "ls" && style.bg.is_some() => Some(()),
+            // Layout pads inline code with a space on each side so the
+            // colored background isn't flush against neighboring text.
+            Span::Text { content, style } if content.trim() == "ls" && style.bg.is_some() => {
+                Some(())
+            }
             _ => None,
         });
         assert!(code.is_some());

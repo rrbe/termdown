@@ -95,7 +95,8 @@ fn main() {
     #[cfg(unix)]
     let saved_termios = disable_echo();
 
-    markdown::render(&md, term_width, &config, theme, &colors);
+    let doc = layout::build(&md, &config, theme);
+    cat::print(&doc, term_width, &colors);
 
     // Drain any pending responses, then restore terminal state.
     #[cfg(unix)]
