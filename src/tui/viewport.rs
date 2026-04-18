@@ -65,8 +65,6 @@ impl Viewport {
         &self.visual_lines[self.top..end]
     }
 
-    // Used in tests; production callers arrive in a later task.
-    #[allow(dead_code)]
     pub fn total_visual_lines(&self) -> usize {
         self.visual_lines.len()
     }

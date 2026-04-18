@@ -1,11 +1,12 @@
 //! Interactive TUI mode.
 
+mod input;
 mod viewport;
 
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -74,15 +75,26 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('c') if ctrl => return Ok(()),
-                    KeyCode::Char('j') | KeyCode::Down => app.viewport.scroll_by(1),
-                    KeyCode::Char('k') | KeyCode::Up => app.viewport.scroll_by(-1),
+                match input::map_normal(key) {
+                    input::Action::Quit => return Ok(()),
+                    input::Action::ScrollLines(d) => app.viewport.scroll_by(d),
+                    input::Action::ScrollHalfPage(s) => {
+                        let delta = (app.viewport.height as i32 / 2) * s;
+                        app.viewport.scroll_by(delta);
+                    }
+                    input::Action::ScrollPage(s) => {
+                        let delta = app.viewport.height as i32 * s;
+                        app.viewport.scroll_by(delta);
+                    }
+                    input::Action::JumpStart => app.viewport.top = 0,
+                    input::Action::JumpEnd => {
+                        let max_top = app
+                            .viewport
+                            .total_visual_lines()
+                            .saturating_sub(app.viewport.height as usize);
+                        app.viewport.top = max_top;
+                    }
+                    // Other actions land in Phase 4-7. No-op for now.
                     _ => {}
                 }
             }
