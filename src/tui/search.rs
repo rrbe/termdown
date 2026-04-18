@@ -8,6 +8,8 @@ use crate::layout::{Line, RenderedDoc, Span};
 #[derive(Debug, Clone)]
 pub struct MatchPos {
     pub line_index: usize,
+    // Consumed in Task 5.4 (highlight rendering).
+    #[allow(dead_code)]
     pub byte_range: Range<usize>,
 }
 
@@ -18,7 +20,11 @@ pub enum Direction {
 }
 
 pub struct SearchState {
+    // `query` retained for future status-bar display; `direction` is consumed
+    // by n/N navigation in Task 5.3.
+    #[allow(dead_code)]
     pub query: String,
+    #[allow(dead_code)]
     pub direction: Direction,
     pub matches: Vec<MatchPos>,
     pub current: Option<usize>,

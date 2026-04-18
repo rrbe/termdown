@@ -2,7 +2,6 @@
 
 mod input;
 mod kitty;
-#[allow(dead_code)]
 mod search;
 mod viewport;
 
@@ -18,13 +17,23 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::text::{Line as RLine, Span as RSpan};
 use ratatui::widgets::Paragraph;
 use ratatui::Terminal;
+use tui_textarea::TextArea;
 
 use crate::config::Config;
 use crate::layout;
 use crate::style::MARGIN_WIDTH;
 use crate::theme::Theme;
+use crate::tui::search::{Direction as SearchDirection, SearchState};
 
 use viewport::Viewport;
+
+enum Mode {
+    Normal,
+    Search {
+        input: Box<TextArea<'static>>,
+        reverse: bool,
+    },
+}
 
 struct App {
     doc: layout::RenderedDoc,
@@ -32,6 +41,9 @@ struct App {
     images: kitty::ImageLifecycle,
     pending_g: bool,
     path: String,
+    mode: Mode,
+    search: Option<SearchState>,
+    should_quit: bool,
 }
 
 impl App {
@@ -42,6 +54,9 @@ impl App {
             images: kitty::ImageLifecycle::default(),
             pending_g: false,
             path,
+            mode: Mode::Normal,
+            search: None,
+            should_quit: false,
         }
     }
 }
@@ -108,56 +123,153 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
         }
 
         if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == event::KeyEventKind::Press
-                    && key.code == event::KeyCode::Char('g')
-                    && !key.modifiers.contains(event::KeyModifiers::CONTROL)
-                {
-                    if app.pending_g {
-                        app.viewport.top = 0;
-                        app.pending_g = false;
-                    } else {
-                        app.pending_g = true;
-                    }
-                    continue;
-                }
-                // Any other key press resets the pending state.
-                if matches!(key.kind, event::KeyEventKind::Press) {
-                    app.pending_g = false;
-                }
-
-                match input::map_normal(key) {
-                    input::Action::Quit => return Ok(()),
-                    input::Action::ScrollLines(d) => app.viewport.scroll_by(d),
-                    input::Action::ScrollHalfPage(s) => {
-                        let delta = (app.viewport.height as i32 / 2) * s;
-                        app.viewport.scroll_by(delta);
-                    }
-                    input::Action::ScrollPage(s) => {
-                        let delta = app.viewport.height as i32 * s;
-                        app.viewport.scroll_by(delta);
-                    }
-                    input::Action::JumpStart => app.viewport.top = 0,
-                    input::Action::JumpEnd => {
-                        let max_top = app
-                            .viewport
-                            .total_visual_lines()
-                            .saturating_sub(app.viewport.height as usize);
-                        app.viewport.top = max_top;
-                    }
-                    input::Action::NextHeading => {
-                        app.viewport
-                            .jump_to_next_heading(&app.doc, app.viewport.top);
-                    }
-                    input::Action::PrevHeading => {
-                        app.viewport
-                            .jump_to_prev_heading(&app.doc, app.viewport.top);
-                    }
-                    // Other actions land in Phase 4-7. No-op for now.
-                    _ => {}
-                }
+            let ev = event::read()?;
+            match &mut app.mode {
+                Mode::Normal => handle_normal_key(app, &ev)?,
+                Mode::Search { .. } => handle_search_key(app, ev)?,
+            }
+            if app.should_quit {
+                return Ok(());
             }
         }
+    }
+}
+
+fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
+    if let Event::Key(key) = ev {
+        if key.kind != event::KeyEventKind::Press {
+            return Ok(());
+        }
+        // gg intercept
+        if key.code == event::KeyCode::Char('g')
+            && !key.modifiers.contains(event::KeyModifiers::CONTROL)
+        {
+            if app.pending_g {
+                app.viewport.top = 0;
+                app.pending_g = false;
+            } else {
+                app.pending_g = true;
+            }
+            return Ok(());
+        }
+        app.pending_g = false;
+
+        match input::map_normal(*key) {
+            input::Action::Quit => {
+                app.should_quit = true;
+            }
+            input::Action::ScrollLines(d) => app.viewport.scroll_by(d),
+            input::Action::ScrollHalfPage(s) => {
+                let delta = (app.viewport.height as i32 / 2) * s;
+                app.viewport.scroll_by(delta);
+            }
+            input::Action::ScrollPage(s) => {
+                let delta = app.viewport.height as i32 * s;
+                app.viewport.scroll_by(delta);
+            }
+            input::Action::JumpStart => app.viewport.top = 0,
+            input::Action::JumpEnd => {
+                let max_top = app
+                    .viewport
+                    .total_visual_lines()
+                    .saturating_sub(app.viewport.height as usize);
+                app.viewport.top = max_top;
+            }
+            input::Action::NextHeading => {
+                app.viewport
+                    .jump_to_next_heading(&app.doc, app.viewport.top);
+            }
+            input::Action::PrevHeading => {
+                app.viewport
+                    .jump_to_prev_heading(&app.doc, app.viewport.top);
+            }
+            input::Action::SearchBegin { reverse } => {
+                let mut ta = TextArea::default();
+                ta.set_cursor_line_style(ratatui::style::Style::default());
+                app.mode = Mode::Search {
+                    input: Box::new(ta),
+                    reverse,
+                };
+            }
+            // Other actions land in later tasks. No-op for now.
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn handle_search_key(app: &mut App, ev: Event) -> io::Result<()> {
+    let Mode::Search { input, reverse } = &mut app.mode else {
+        return Ok(());
+    };
+    let reverse = *reverse;
+    let Event::Key(key) = ev else {
+        return Ok(());
+    };
+    if key.kind != event::KeyEventKind::Press {
+        return Ok(());
+    }
+    match key.code {
+        event::KeyCode::Esc => {
+            app.mode = Mode::Normal;
+        }
+        event::KeyCode::Enter => {
+            let query: String = input.lines().join("");
+            app.mode = Mode::Normal;
+            let direction = if reverse {
+                SearchDirection::Backward
+            } else {
+                SearchDirection::Forward
+            };
+            let state = SearchState::new(query, direction, &app.doc);
+            app.search = Some(state);
+            apply_search_jump(app, reverse);
+        }
+        _ => {
+            input.input(key);
+        }
+    }
+    Ok(())
+}
+
+fn apply_search_jump(app: &mut App, reverse: bool) {
+    let Some(state) = app.search.as_mut() else {
+        return;
+    };
+    if state.matches.is_empty() {
+        state.current = None;
+        return;
+    }
+    let current_logical = app
+        .viewport
+        .visible()
+        .first()
+        .map(|vl| vl.logical_index)
+        .unwrap_or(0);
+    let idx = if !reverse {
+        state
+            .matches
+            .iter()
+            .position(|m| m.line_index >= current_logical)
+            .unwrap_or(0)
+    } else {
+        state
+            .matches
+            .iter()
+            .rposition(|m| m.line_index <= current_logical)
+            .unwrap_or(state.matches.len() - 1)
+    };
+    state.current = Some(idx);
+    let line = state.matches[idx].line_index;
+    center_on_logical(&mut app.viewport, line);
+}
+
+fn center_on_logical(vp: &mut Viewport, logical: usize) {
+    if let Some(vi) = vp.visual_line_for_logical(logical) {
+        let third = (vp.height as usize) / 3;
+        let new_top = vi.saturating_sub(third);
+        let max_top = vp.total_visual_lines().saturating_sub(vp.height as usize);
+        vp.top = new_top.min(max_top);
     }
 }
 
@@ -242,6 +354,15 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     let status =
         Paragraph::new(status_text).style(RStyle::default().bg(RColor::DarkGray).fg(RColor::White));
     frame.render_widget(status, chunks[1]);
+
+    // Status row override — show search prompt if in Search mode.
+    if let Mode::Search { input, reverse } = &app.mode {
+        let prefix = if *reverse { "?" } else { "/" };
+        let typed: String = input.lines().join("");
+        let prompt_text = format!("{prefix}{typed}");
+        let prompt = Paragraph::new(prompt_text);
+        frame.render_widget(prompt, chunks[1]);
+    }
 }
 
 fn progress_percent(app: &App) -> u32 {

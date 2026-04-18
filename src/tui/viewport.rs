@@ -66,6 +66,14 @@ impl Viewport {
         self.visual_lines.len()
     }
 
+    /// Find the first `VisualLine` index whose logical_index matches the
+    /// given logical line (the first visual row of that logical).
+    pub fn visual_line_for_logical(&self, logical: usize) -> Option<usize> {
+        self.visual_lines
+            .iter()
+            .position(|vl| vl.logical_index == logical)
+    }
+
     /// Move the viewport to the next heading line after `after_visual`.
     /// No-op if no heading exists further in the document.
     pub fn jump_to_next_heading(&mut self, doc: &RenderedDoc, after_visual: usize) {
