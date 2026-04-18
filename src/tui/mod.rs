@@ -303,8 +303,15 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
         // placement tracking so `sync` re-emits every visible image.
         if app.needs_full_redraw {
             terminal.clear()?;
+            // Ghostty evicts cached kitty image data on `\x1b[2J`, so a
+            // subsequent `a=p,i=X` references an unknown id and the
+            // placement is silently dropped — leaving blank space where the
+            // heading image should appear. Forget the transmitted set and
+            // re-upload every active image after the clear.
+            app.images.reset_transmissions();
             let mut out = io::stdout().lock();
             let _ = app.images.reset_placements(&mut out);
+            let _ = app.register_active_images(&mut out);
             let _ = out.flush();
             app.needs_full_redraw = false;
         }
@@ -774,15 +781,12 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     for vl in active.viewport.visible() {
         let logical = &active.doc.lines[vl.logical_index];
 
-        // Compute image-height expansion (only on the first visual line for the logical).
-        let is_first_visual_of_logical = vl.byte_start == 0;
-        let mut image_rows: u16 = 0;
-        if is_first_visual_of_logical {
-            for span in &logical.spans {
-                if let layout::Span::HeadingImage { rows, .. } = span {
-                    image_rows = image_rows.max(*rows);
-                }
-            }
+        // Heading spacer VisualLines reserve the rows below the main heading
+        // line so the kitty image's cell footprint matches the viewport row
+        // budget. Render as empty — the image paints over them.
+        if vl.is_spacer {
+            rendered.push(RLine::from(Vec::<RSpan>::new()));
+            continue;
         }
 
         let matches = visible_matches_for_line(
@@ -797,12 +801,6 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         full_spans.push(margin_span.clone());
         full_spans.extend(rspans);
         rendered.push(RLine::from(full_spans));
-        for _ in 1..image_rows.max(1) {
-            if image_rows == 0 {
-                break;
-            }
-            rendered.push(RLine::from(Vec::<RSpan>::new()));
-        }
     }
 
     let body_area = if active.toc_open {
@@ -937,23 +935,27 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
         MARGIN_WIDTH as u16
     };
     let mut out = HashMap::new();
-    let mut visual_row: u16 = 0;
-    for vl in active.viewport.visible() {
+    // wrap_all emits one VisualLine per screen row (headings expand into
+    // N rows: main + spacers), so visual_row just increments by 1 each
+    // iteration and matches the row count used by draw() + the viewport.
+    let body_height = active.viewport.height;
+    for (visual_row, vl) in active.viewport.visible().iter().enumerate() {
+        if vl.is_spacer || vl.byte_start != 0 {
+            continue;
+        }
         let logical = &active.doc.lines[vl.logical_index];
-        let is_first_visual_of_logical = vl.byte_start == 0;
-        let mut image_rows: u16 = 0;
-        if is_first_visual_of_logical {
-            for span in &logical.spans {
-                if let layout::Span::HeadingImage { id, rows } = span {
-                    out.insert(*id, (col_offset, visual_row));
-                    image_rows = image_rows.max(*rows);
+        let vr = visual_row as u16;
+        for span in &logical.spans {
+            if let layout::Span::HeadingImage { id, rows } = span {
+                // Skip placement if the image's full row budget doesn't fit
+                // within the body area. Kitty paints images at natural
+                // pixel size, so a heading near the bottom would otherwise
+                // bleed into the status bar. The user can scroll another
+                // row or two to bring the whole heading on-screen.
+                if vr.saturating_add(*rows) <= body_height {
+                    out.insert(*id, (col_offset, vr));
                 }
             }
-        }
-        if image_rows > 0 {
-            visual_row = visual_row.saturating_add(image_rows);
-        } else {
-            visual_row = visual_row.saturating_add(1);
         }
     }
     out

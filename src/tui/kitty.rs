@@ -91,6 +91,13 @@ impl ImageLifecycle {
         self.placed.clear();
         Ok(())
     }
+
+    /// Forget which ids have been transmitted, so the next `register` call on
+    /// each id re-uploads its PNG data. Used when we suspect the terminal has
+    /// evicted cached image data (e.g. after `\x1b[2J`).
+    pub fn reset_transmissions(&mut self) {
+        self.transmitted.clear();
+    }
 }
 
 #[cfg(test)]

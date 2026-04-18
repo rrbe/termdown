@@ -12,6 +12,10 @@ pub struct VisualLine {
     pub logical_index: usize,
     pub byte_start: usize,
     pub byte_end: usize,
+    /// True for the extra rows emitted below a heading's main line so the
+    /// heading image's cell footprint matches the viewport's row count.
+    /// These rows render as blank and do not carry image placements.
+    pub is_spacer: bool,
 }
 
 pub struct Viewport {
@@ -128,16 +132,37 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
 
     let mut out = Vec::with_capacity(lines.len());
     for (li, line) in lines.iter().enumerate() {
-        // Never-wrap kinds: one visual line each, full byte range.
+        // Headings occupy N screen rows (N = image_rows for H1-H3 with images,
+        // 1 otherwise). Emit N VisualLines — a main one plus N-1 spacers — so
+        // the viewport's scroll math sees the same row count that draw() and
+        // desired_image_placements use. Without this, max_top undercounts and
+        // the last headings become unreachable + images overflow body area.
+        if let LineKind::Heading { .. } = line.kind {
+            let end = line_byte_len(line);
+            let rows = heading_row_count(line);
+            out.push(VisualLine {
+                logical_index: li,
+                byte_start: 0,
+                byte_end: end,
+                is_spacer: false,
+            });
+            for _ in 1..rows {
+                out.push(VisualLine {
+                    logical_index: li,
+                    byte_start: 0,
+                    byte_end: 0,
+                    is_spacer: true,
+                });
+            }
+            continue;
+        }
         match line.kind {
-            LineKind::Blank
-            | LineKind::HorizontalRule
-            | LineKind::Table
-            | LineKind::Heading { .. } => {
+            LineKind::Blank | LineKind::HorizontalRule | LineKind::Table => {
                 out.push(VisualLine {
                     logical_index: li,
                     byte_start: 0,
                     byte_end: line_byte_len(line),
+                    is_spacer: false,
                 });
                 continue;
             }
@@ -162,6 +187,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 logical_index: li,
                 byte_start: 0,
                 byte_end: text.len(),
+                is_spacer: false,
             });
             continue;
         }
@@ -179,6 +205,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                     logical_index: li,
                     byte_start,
                     byte_end: cur_byte,
+                    is_spacer: false,
                 });
                 byte_start = cur_byte;
                 cur_width = 0;
@@ -192,6 +219,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 logical_index: li,
                 byte_start,
                 byte_end: text.len(),
+                is_spacer: false,
             });
         } else if text.is_empty() {
             // Empty logical line (e.g. a `Body` with no content) — emit one empty visual.
@@ -199,6 +227,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 logical_index: li,
                 byte_start: 0,
                 byte_end: 0,
+                is_spacer: false,
             });
         }
     }
@@ -213,6 +242,20 @@ fn line_byte_len(line: &Line) -> usize {
             Span::HeadingImage { .. } => 0,
         })
         .sum()
+}
+
+/// How many screen rows a heading line occupies. For H1-H3 with image spans,
+/// this is the span's `rows` field (already refined by
+/// `tui::refine_image_rows` once the real cell pixel height is known). For
+/// text-only headings (H4-H6 or when font loading failed), it's 1.
+fn heading_row_count(line: &Line) -> u16 {
+    let mut rows: u16 = 1;
+    for span in &line.spans {
+        if let Span::HeadingImage { rows: r, .. } = span {
+            rows = rows.max(*r);
+        }
+    }
+    rows
 }
 
 #[cfg(test)]
