@@ -2,6 +2,8 @@
 
 mod input;
 mod kitty;
+#[allow(dead_code)]
+mod search;
 mod viewport;
 
 use std::collections::HashMap;
