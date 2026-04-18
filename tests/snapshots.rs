@@ -8,8 +8,12 @@ fn binary_path() -> &'static str {
 
 fn render(path: &Path) -> String {
     let out = Command::new(binary_path())
+        .arg("--theme")
+        .arg("dark")
         .arg(path)
         .env("TERM_PROGRAM", "ghostty")
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -25,7 +29,7 @@ fn check_snapshot(fixture: &str) {
     let actual = render(&md);
     if actual != expected {
         let tmp = std::env::temp_dir().join(format!("termdown-snapshot-{fixture}.ansi"));
-        fs::write(&tmp, &actual).ok();
+        fs::write(&tmp, &actual).expect("failed to write snapshot diff to temp file");
         panic!(
             "snapshot mismatch for {fixture}\n  expected: {}\n  actual written to: {}",
             expected_path.display(),
