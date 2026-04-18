@@ -191,6 +191,8 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                     reverse,
                 };
             }
+            input::Action::SearchNext => advance_search(app, 1),
+            input::Action::SearchPrev => advance_search(app, -1),
             // Other actions land in later tasks. No-op for now.
             _ => {}
         }
@@ -261,6 +263,21 @@ fn apply_search_jump(app: &mut App, reverse: bool) {
     };
     state.current = Some(idx);
     let line = state.matches[idx].line_index;
+    center_on_logical(&mut app.viewport, line);
+}
+
+fn advance_search(app: &mut App, delta: i32) {
+    let Some(state) = app.search.as_mut() else {
+        return;
+    };
+    if state.matches.is_empty() {
+        return;
+    }
+    let len = state.matches.len() as i32;
+    let cur = state.current.unwrap_or(0) as i32;
+    let next = ((cur + delta) % len + len) % len;
+    state.current = Some(next as usize);
+    let line = state.matches[next as usize].line_index;
     center_on_logical(&mut app.viewport, line);
 }
 
