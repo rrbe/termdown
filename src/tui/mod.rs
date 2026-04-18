@@ -140,6 +140,14 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
                             .saturating_sub(app.viewport.height as usize);
                         app.viewport.top = max_top;
                     }
+                    input::Action::NextHeading => {
+                        app.viewport
+                            .jump_to_next_heading(&app.doc, app.viewport.top);
+                    }
+                    input::Action::PrevHeading => {
+                        app.viewport
+                            .jump_to_prev_heading(&app.doc, app.viewport.top);
+                    }
                     // Other actions land in Phase 4-7. No-op for now.
                     _ => {}
                 }

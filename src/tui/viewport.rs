@@ -68,6 +68,50 @@ impl Viewport {
     pub fn total_visual_lines(&self) -> usize {
         self.visual_lines.len()
     }
+
+    /// Move the viewport to the next heading line after `after_visual`.
+    /// No-op if no heading exists further in the document.
+    pub fn jump_to_next_heading(&mut self, doc: &RenderedDoc, after_visual: usize) {
+        let start_logical = self
+            .visual_lines
+            .get(after_visual)
+            .map(|vl| vl.logical_index)
+            .unwrap_or(0);
+        let target = doc.headings.iter().find(|h| h.line_index > start_logical);
+        if let Some(h) = target {
+            if let Some(vi) = self
+                .visual_lines
+                .iter()
+                .position(|vl| vl.logical_index == h.line_index)
+            {
+                self.top = vi;
+            }
+        }
+    }
+
+    /// Move the viewport to the heading line before `before_visual`.
+    /// No-op if no heading exists earlier.
+    pub fn jump_to_prev_heading(&mut self, doc: &RenderedDoc, before_visual: usize) {
+        let start_logical = self
+            .visual_lines
+            .get(before_visual)
+            .map(|vl| vl.logical_index)
+            .unwrap_or(0);
+        let target = doc
+            .headings
+            .iter()
+            .rev()
+            .find(|h| h.line_index < start_logical);
+        if let Some(h) = target {
+            if let Some(vi) = self
+                .visual_lines
+                .iter()
+                .position(|vl| vl.logical_index == h.line_index)
+            {
+                self.top = vi;
+            }
+        }
+    }
 }
 
 fn wrap_all(lines: &[Line], _width: u16) -> Vec<VisualLine> {
@@ -152,6 +196,85 @@ mod tests {
         assert_eq!(vp.visible().len(), 3);
         // max_top = total - height = 3 - 10 = 0 (saturating)
         vp.scroll_by(100);
+        assert_eq!(vp.top, 0);
+    }
+
+    #[test]
+    fn heading_jump_moves_to_heading_line() {
+        use crate::layout::{HeadingEntry, Line, LineKind, Span, Style};
+
+        let lines: Vec<Line> = (0..10)
+            .map(|i| Line {
+                spans: vec![Span::Text {
+                    content: format!("row {i}"),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Body,
+            })
+            .collect();
+        let headings = vec![
+            HeadingEntry {
+                level: 1,
+                text: "A".into(),
+                line_index: 3,
+            },
+            HeadingEntry {
+                level: 1,
+                text: "B".into(),
+                line_index: 7,
+            },
+        ];
+        let doc = RenderedDoc {
+            lines,
+            headings,
+            images: vec![],
+        };
+        let mut vp = Viewport::new(3, 40);
+        vp.ensure_wrap(&doc);
+
+        vp.jump_to_next_heading(&doc, 0);
+        assert_eq!(vp.top, 3);
+
+        vp.jump_to_next_heading(&doc, vp.top + 1);
+        assert_eq!(vp.top, 7);
+
+        vp.jump_to_prev_heading(&doc, 7);
+        assert_eq!(vp.top, 3);
+    }
+
+    #[test]
+    fn heading_jump_no_op_when_nothing_in_direction() {
+        use crate::layout::{HeadingEntry, Line, LineKind, Span, Style};
+        let lines = (0..5)
+            .map(|i| Line {
+                spans: vec![Span::Text {
+                    content: format!("r{i}"),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Body,
+            })
+            .collect();
+        let headings = vec![HeadingEntry {
+            level: 1,
+            text: "A".into(),
+            line_index: 2,
+        }];
+        let doc = RenderedDoc {
+            lines,
+            headings,
+            images: vec![],
+        };
+        let mut vp = Viewport::new(3, 40);
+        vp.ensure_wrap(&doc);
+        vp.top = 3;
+
+        // No heading after visual line 3 — expect top unchanged.
+        vp.jump_to_next_heading(&doc, 3);
+        assert_eq!(vp.top, 3);
+
+        // No heading before line 0 — expect top unchanged.
+        vp.top = 0;
+        vp.jump_to_prev_heading(&doc, 0);
         assert_eq!(vp.top, 0);
     }
 }
