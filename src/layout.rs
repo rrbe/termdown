@@ -119,6 +119,10 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut quote_depth: u8 = 0;
     let mut list_stack: Vec<ListState> = Vec::new();
     let mut in_code_block: Option<Option<String>> = None;
+    let mut table_rows: Vec<Vec<Vec<Span>>> = Vec::new();
+    let mut current_row: Vec<Vec<Span>> = Vec::new();
+    let mut in_table_header = false;
+    let mut image_url: Option<String> = None;
 
     for event in parser {
         match event {
@@ -315,6 +319,109 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                 });
             }
 
+            // Tables
+            Event::Start(Tag::Table(..)) => {
+                table_rows.clear();
+                in_table_header = false;
+            }
+            Event::End(TagEnd::Table) => {
+                emit_table(&mut lines, &table_rows);
+                table_rows.clear();
+            }
+            Event::Start(Tag::TableHead) => {
+                in_table_header = true;
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableHead) => {
+                table_rows.push(std::mem::take(&mut current_row));
+                in_table_header = false;
+            }
+            Event::Start(Tag::TableRow) => {
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableRow) => {
+                table_rows.push(std::mem::take(&mut current_row));
+            }
+            Event::Start(Tag::TableCell) => {
+                spans.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                if in_table_header {
+                    for s in spans.iter_mut() {
+                        if let Span::Text { style, .. } = s {
+                            style.bold = true;
+                        }
+                    }
+                }
+                current_row.push(std::mem::take(&mut spans));
+            }
+
+            // Images
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                image_url = Some(dest_url.to_string());
+            }
+            Event::End(TagEnd::Image) => {
+                flush_text(&mut text_buf, &mut spans, &style);
+                let alt = spans_plain_text_inline(&spans);
+                spans.clear();
+                let url = image_url.take().unwrap_or_default();
+                let content = format!("[\u{1f5bc} {alt}]({url})");
+                let dim_style = Style {
+                    dim: true,
+                    ..Style::default()
+                };
+                lines.push(Line {
+                    spans: vec![Span::Text {
+                        content,
+                        style: dim_style,
+                    }],
+                    kind: LineKind::Body,
+                });
+            }
+
+            // Task list marker
+            Event::TaskListMarker(checked) => {
+                let marker = if checked { "[\u{2713}] " } else { "[ ] " };
+                if spans.is_empty() && text_buf.is_empty() {
+                    text_buf.push_str(marker);
+                } else if let Some(Span::Text { content, .. }) = spans.first_mut() {
+                    *content = format!("{marker}{content}");
+                } else {
+                    text_buf = format!("{marker}{text_buf}");
+                }
+            }
+
+            // HTML (block and inline)
+            Event::Html(s) => {
+                let dim_style = Style {
+                    dim: true,
+                    ..Style::default()
+                };
+                for line in s.lines() {
+                    lines.push(Line {
+                        spans: vec![Span::Text {
+                            content: line.to_string(),
+                            style: dim_style.clone(),
+                        }],
+                        kind: LineKind::Body,
+                    });
+                }
+            }
+            Event::InlineHtml(s) => {
+                text_buf.push_str(&s);
+            }
+
+            // Breaks
+            Event::SoftBreak | Event::HardBreak => {
+                if heading_level > 0 {
+                    heading_text.push(' ');
+                } else {
+                    text_buf.push(' ');
+                }
+            }
+
             _ => {}
         }
     }
@@ -324,6 +431,105 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
         headings,
         images,
     }
+}
+
+/// Render accumulated table rows into `LineKind::Table` lines with padding and separators.
+/// Keeps the margin-less column layout the existing cat mode produces — the outer
+/// "    " margin is added by `cat.rs`.
+#[allow(dead_code)]
+fn emit_table(lines: &mut Vec<Line>, rows: &[Vec<Vec<Span>>]) {
+    if rows.is_empty() {
+        return;
+    }
+    let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut widths = vec![0usize; cols];
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            let w: usize = cell.iter().map(plain_width).sum();
+            if let Some(slot) = widths.get_mut(i) {
+                *slot = (*slot).max(w);
+            }
+        }
+    }
+
+    for (ri, row) in rows.iter().enumerate() {
+        let mut out_spans: Vec<Span> = Vec::new();
+        for (i, cell) in row.iter().enumerate() {
+            for s in cell {
+                out_spans.push(s.clone());
+            }
+            let w: usize = cell.iter().map(plain_width).sum();
+            let pad = widths[i].saturating_sub(w);
+            if pad > 0 {
+                out_spans.push(Span::Text {
+                    content: " ".repeat(pad),
+                    style: Style::default(),
+                });
+            }
+            if i < row.len() - 1 {
+                let dim_style = Style {
+                    dim: true,
+                    ..Style::default()
+                };
+                out_spans.push(Span::Text {
+                    content: "  \u{2502}  ".into(),
+                    style: dim_style,
+                });
+            }
+        }
+        lines.push(Line {
+            spans: out_spans,
+            kind: LineKind::Table,
+        });
+
+        // Separator after header row.
+        if ri == 0 {
+            let mut sep_spans: Vec<Span> = Vec::new();
+            let dim_style = Style {
+                dim: true,
+                ..Style::default()
+            };
+            for (i, &w) in widths.iter().enumerate() {
+                sep_spans.push(Span::Text {
+                    content: "\u{2500}".repeat(w),
+                    style: dim_style.clone(),
+                });
+                if i < widths.len() - 1 {
+                    sep_spans.push(Span::Text {
+                        content: "  \u{253c}  ".into(),
+                        style: dim_style.clone(),
+                    });
+                }
+            }
+            lines.push(Line {
+                spans: sep_spans,
+                kind: LineKind::Table,
+            });
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn plain_width(span: &Span) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    match span {
+        Span::Text { content, .. } | Span::Link { content, .. } => {
+            UnicodeWidthStr::width(content.as_str())
+        }
+        Span::HeadingImage { .. } => 0,
+    }
+}
+
+#[allow(dead_code)]
+fn spans_plain_text_inline(spans: &[Span]) -> String {
+    let mut s = String::new();
+    for sp in spans {
+        match sp {
+            Span::Text { content, .. } | Span::Link { content, .. } => s.push_str(content),
+            Span::HeadingImage { .. } => {}
+        }
+    }
+    s
 }
 
 /// Flush the pending plain-text buffer into a styled span and clear it.
@@ -546,5 +752,62 @@ mod tests {
             )
         });
         assert!(has_lang);
+    }
+
+    #[test]
+    fn build_table_emits_table_lines() {
+        let doc = build_plain("| A | B |\n| - | - |\n| x | y |\n");
+        let rows: Vec<_> = doc
+            .lines
+            .iter()
+            .filter(|l| matches!(l.kind, LineKind::Table))
+            .collect();
+        // Header + separator + body = 3 lines minimum.
+        assert!(rows.len() >= 3);
+    }
+
+    #[test]
+    fn build_task_list_marker_replaces_bullet() {
+        let doc = build_plain("- [x] done\n- [ ] todo\n");
+        let items: Vec<_> = doc
+            .lines
+            .iter()
+            .filter(|l| matches!(l.kind, LineKind::ListItem { .. }))
+            .collect();
+        assert_eq!(items.len(), 2);
+        let first = spans_plain_text(&items[0].spans);
+        let second = spans_plain_text(&items[1].spans);
+        assert!(first.contains("[✓]") || first.contains("[x]"));
+        assert!(second.contains("[ ]"));
+    }
+
+    #[test]
+    fn build_image_renders_placeholder_text() {
+        let doc = build_plain("![alt](https://example.com/x.png)\n");
+        let placeholder = doc.lines.iter().any(|l| {
+            spans_plain_text(&l.spans).contains("alt")
+                && spans_plain_text(&l.spans).contains("https://example.com/x.png")
+        });
+        assert!(placeholder);
+    }
+
+    #[test]
+    fn build_html_block_emits_body_line_per_source_line() {
+        let doc = build_plain("<div>\n<p>x</p>\n</div>\n");
+        let html_text: Vec<_> = doc
+            .lines
+            .iter()
+            .filter_map(|l| {
+                if matches!(l.kind, LineKind::Body) {
+                    Some(spans_plain_text(&l.spans))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let joined = html_text.join("\n");
+        assert!(joined.contains("<div>"));
+        assert!(joined.contains("<p>x</p>"));
+        assert!(joined.contains("</div>"));
     }
 }
