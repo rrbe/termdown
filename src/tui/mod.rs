@@ -3,6 +3,8 @@
 //! on exit. Content-aware scrolling, search, Kitty image lifecycle, and
 //! per-doc history arrive in later tasks.
 
+mod viewport;
+
 use std::io;
 use std::time::Duration;
 
