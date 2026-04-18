@@ -352,8 +352,9 @@ pub fn kitty_display(png: &[u8]) -> String {
 /// PNG data + cell dimensions for a rendered heading image.
 /// Stored by id in `RenderedDoc` and transmitted to the terminal
 /// once per TUI session (or emitted directly in cat mode).
-#[derive(Debug, Clone)]
+// TODO: remove #[allow(dead_code)] once Task 1.5 wires up image production
 #[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadingImage {
     pub id: u32,
     pub png: Vec<u8>,
