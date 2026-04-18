@@ -44,6 +44,7 @@ struct App {
     mode: Mode,
     search: Option<SearchState>,
     should_quit: bool,
+    toc_open: bool,
 }
 
 impl App {
@@ -57,6 +58,7 @@ impl App {
             mode: Mode::Normal,
             search: None,
             should_quit: false,
+            toc_open: false,
         }
     }
 }
@@ -193,6 +195,18 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             }
             input::Action::SearchNext => advance_search(app, 1),
             input::Action::SearchPrev => advance_search(app, -1),
+            input::Action::ToggleToc => {
+                app.toc_open = !app.toc_open;
+                // Recompute viewport width for the new body area.
+                let new_width = if app.toc_open {
+                    app.viewport.width.saturating_sub(30)
+                } else {
+                    app.viewport.width.saturating_add(30)
+                };
+                app.viewport.width = new_width;
+                // ensure_wrap keys on `cache_width == self.width`; changing width
+                // invalidates the cache so the next frame re-wraps correctly.
+            }
             // Other actions land in later tasks. No-op for now.
             _ => {}
         }
@@ -457,8 +471,36 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         }
     }
 
+    let body_area = if app.toc_open {
+        let split = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([
+                ratatui::layout::Constraint::Length(30),
+                ratatui::layout::Constraint::Min(20),
+            ])
+            .split(chunks[0]);
+        let toc_items: Vec<ratatui::widgets::ListItem> = app
+            .doc
+            .headings
+            .iter()
+            .map(|h| {
+                let indent = "  ".repeat((h.level as usize).saturating_sub(1));
+                ratatui::widgets::ListItem::new(format!("{indent}{}", h.text))
+            })
+            .collect();
+        let toc = ratatui::widgets::List::new(toc_items).block(
+            ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::RIGHT)
+                .title("Contents"),
+        );
+        frame.render_widget(toc, split[0]);
+        split[1]
+    } else {
+        chunks[0]
+    };
+
     let para = Paragraph::new(rendered);
-    frame.render_widget(para, chunks[0]);
+    frame.render_widget(para, body_area);
 
     // Status bar
     let pct = progress_percent(app);
@@ -487,7 +529,12 @@ fn progress_percent(app: &App) -> u32 {
 }
 
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
-    let col = MARGIN_WIDTH as u16;
+    let col_offset: u16 = if app.toc_open {
+        // ToC panel (30) + margin within body panel (MARGIN_WIDTH).
+        30 + MARGIN_WIDTH as u16
+    } else {
+        MARGIN_WIDTH as u16
+    };
     let mut out = HashMap::new();
     let mut visual_row: u16 = 0;
     for vl in app.viewport.visible() {
@@ -497,7 +544,7 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
         if is_first_visual_of_logical {
             for span in &logical.spans {
                 if let layout::Span::HeadingImage { id, rows } = span {
-                    out.insert(*id, (col, visual_row));
+                    out.insert(*id, (col_offset, visual_row));
                     image_rows = image_rows.max(*rows);
                 }
             }
