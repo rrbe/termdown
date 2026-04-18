@@ -64,6 +64,8 @@ struct App {
     /// Remembered so `push_new_doc` can build a correctly-sized `Viewport`.
     term_size: (u16, u16),
     should_quit: bool,
+    config: crate::config::Config,
+    theme: crate::theme::Theme,
 }
 
 impl App {
@@ -72,6 +74,8 @@ impl App {
         doc: layout::RenderedDoc,
         body_height: u16,
         width: u16,
+        config: crate::config::Config,
+        theme: crate::theme::Theme,
     ) -> Self {
         let mut app = App {
             docs: Vec::new(),
@@ -83,6 +87,8 @@ impl App {
             next_image_id: 1,
             term_size: (width, body_height),
             should_quit: false,
+            config,
+            theme,
         };
         app.push_new_doc(path, doc);
         app
@@ -100,7 +106,6 @@ impl App {
     /// image ids (and any `HeadingImage` / `LineKind::Heading { id }` refs
     /// that point at them) from the global allocator so ids never collide
     /// across docs in a single session.
-    #[allow(dead_code)] // Consumed by Task 7.3 (follow-link-to-another-md).
     fn push_new_doc(&mut self, path: String, mut doc: layout::RenderedDoc) -> usize {
         let offset = self.next_image_id;
         // layout::build() assigns ids starting at 1; shift each by (offset - 1)
@@ -161,6 +166,39 @@ impl App {
         }
         Ok(())
     }
+
+    /// Open a link target. If it's a local `.md` file, pushes a new DocEntry
+    /// onto the history stack and makes it active. Otherwise, spawns the
+    /// platform URL handler.
+    fn open_link_target(&mut self, target: &str) {
+        if looks_like_local_md(target) {
+            // Resolve relative to the active doc's path.
+            let base = std::path::Path::new(&self.active().path);
+            let base_dir = base.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let resolved = base_dir.join(target);
+            if resolved.is_file() {
+                match std::fs::read_to_string(&resolved) {
+                    Ok(src) => {
+                        let new_doc = layout::build(&src, &self.config, self.theme);
+                        let new_path = resolved.display().to_string();
+                        let new_cursor = self.push_new_doc(new_path, new_doc);
+                        self.history.push(self.cursor);
+                        self.forward.clear();
+                        self.cursor = new_cursor;
+                        let mut out = std::io::stdout().lock();
+                        let _ = self.register_active_images(&mut out);
+                        let _ = std::io::Write::flush(&mut out);
+                    }
+                    Err(_) => {
+                        // Fall back to opening externally.
+                        spawn_open(target);
+                    }
+                }
+                return;
+            }
+        }
+        spawn_open(target);
+    }
 }
 
 pub fn run(path: &str, config: &Config, theme: Theme) {
@@ -173,13 +211,13 @@ pub fn run(path: &str, config: &Config, theme: Theme) {
     };
     let doc = layout::build(&source, config, theme);
 
-    if let Err(e) = run_ui(doc, path.to_string()) {
+    if let Err(e) = run_ui(doc, path.to_string(), config.clone(), theme) {
         eprintln!("termdown: tui error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_ui(doc: layout::RenderedDoc, path: String) -> io::Result<()> {
+fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(stdout, EnterAlternateScreen)?;
@@ -187,7 +225,7 @@ fn run_ui(doc: layout::RenderedDoc, path: String) -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
     let body_height = size.height.saturating_sub(1);
-    let mut app = App::new_with_initial_doc(path, doc, body_height, size.width);
+    let mut app = App::new_with_initial_doc(path, doc, body_height, size.width, config, theme);
 
     // Transmit all heading PNGs once; subsequent frames only emit placement commands.
     {
@@ -339,7 +377,8 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                 match links.len() {
                     0 => {}
                     1 => {
-                        open_url(&links[0].1);
+                        let url = links[0].1.clone();
+                        app.open_link_target(&url);
                     }
                     _ => {
                         app.mode = Mode::LinkSelect { links };
@@ -410,7 +449,7 @@ fn handle_link_select_key(app: &mut App, ev: Event) -> io::Result<()> {
                 let (_, url) = &links[idx - 1];
                 let url = url.clone();
                 app.mode = Mode::Normal;
-                open_url(&url);
+                app.open_link_target(&url);
             }
         }
         _ => {}
@@ -440,7 +479,15 @@ fn visible_links(app: &App) -> Vec<(String, String)> {
     out
 }
 
-fn open_url(url: &str) {
+fn looks_like_local_md(target: &str) -> bool {
+    if target.contains("://") {
+        return false;
+    }
+    let lower = target.to_ascii_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
+}
+
+fn spawn_open(url: &str) {
     let cmd = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "windows") {
@@ -448,9 +495,7 @@ fn open_url(url: &str) {
     } else {
         "xdg-open"
     };
-
     if cmd == "cmd" {
-        // Windows `cmd /C start "" "https://..."` is the portable way.
         let _ = std::process::Command::new("cmd")
             .args(["/C", "start", "", url])
             .spawn();
@@ -800,4 +845,27 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod open_link_tests {
+    use super::*;
+
+    #[test]
+    fn looks_like_local_md_accepts_relative_md_paths() {
+        assert!(looks_like_local_md("other.md"));
+        assert!(looks_like_local_md("./docs/other.md"));
+        assert!(looks_like_local_md("../a.md"));
+        assert!(looks_like_local_md("a.markdown"));
+        assert!(looks_like_local_md("a.MD"));
+    }
+
+    #[test]
+    fn looks_like_local_md_rejects_urls_and_non_md() {
+        assert!(!looks_like_local_md("https://example.com/a.md"));
+        assert!(!looks_like_local_md("http://a.md"));
+        assert!(!looks_like_local_md("file:///a.md"));
+        assert!(!looks_like_local_md("other.txt"));
+        assert!(!looks_like_local_md(""));
+    }
 }
