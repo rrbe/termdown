@@ -1,3 +1,4 @@
+mod cat;
 mod config;
 mod font;
 mod layout;
