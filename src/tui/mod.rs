@@ -752,7 +752,6 @@ fn clipped_spans(
 
 fn draw(frame: &mut ratatui::Frame, app: &App) {
     use ratatui::layout::{Constraint, Direction, Layout};
-    use ratatui::style::{Color as RColor, Style as RStyle};
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -834,38 +833,153 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     let para = Paragraph::new(rendered);
     frame.render_widget(para, body_area);
 
-    // Status bar
+    render_status_bar(frame, chunks[1], app);
+}
+
+/// Render the single-row status bar: left region shows the active mode's
+/// prompt (search query, link-select overlay, or empty for Normal), right
+/// region shows `path  pct%`. When space is tight, `pct%` is dropped first,
+/// then the path is middle-truncated so the filename tail stays visible.
+fn render_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    use ratatui::style::Style as RStyle;
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+    let total = area.width as usize;
+    if total == 0 {
+        return;
+    }
+
+    let active = app.active();
     let pct = progress_percent(app);
-    let status_text = format!(" {}  {pct}%", active.path);
-    let status =
-        Paragraph::new(status_text).style(RStyle::default().bg(RColor::DarkGray).fg(RColor::White));
-    frame.render_widget(status, chunks[1]);
+    let path = active.path.as_str();
 
-    // Status row override — show search prompt if in Search mode.
-    if let Mode::Search { input, reverse } = &app.mode {
-        let prefix = if *reverse { "?" } else { "/" };
-        let typed: String = input.lines().join("");
-        let prompt_text = format!("{prefix}{typed}");
-        let prompt = Paragraph::new(prompt_text);
-        frame.render_widget(prompt, chunks[1]);
-    }
+    let (bg, fg) = status_colors(app.theme);
+    let style = RStyle::default().bg(bg).fg(fg);
 
-    // Status row override — show link-select overlay if in LinkSelect mode.
-    if let Mode::LinkSelect { links } = &app.mode {
-        let mut label = String::from(" Open link: ");
-        for (i, (content, _)) in links.iter().enumerate().take(9) {
-            label.push_str(&format!("[{}]{}  ", i + 1, short(content, 20)));
+    let pct_s = format!("{pct}%");
+    let path_w = path.width();
+    let pct_w = pct_s.width();
+    let right_full = 1 + path_w + 2 + pct_w + 1; // " <path>  <pct>% "
+    let right_path_only = 1 + path_w + 1; // " <path> "
+
+    let left_text: String = match &app.mode {
+        Mode::Search { input, reverse } => {
+            let prefix = if *reverse { "?" } else { "/" };
+            let typed: String = input.lines().join("");
+            format!("{prefix}{typed}")
         }
-        if links.len() > 9 {
-            label.push('…');
+        Mode::LinkSelect { links } => {
+            let mut label = String::from(" Open link: ");
+            for (i, (content, _)) in links.iter().enumerate().take(9) {
+                label.push_str(&format!("[{}]{}  ", i + 1, short(content, 20)));
+            }
+            if links.len() > 9 {
+                label.push('…');
+            }
+            label
         }
-        let overlay = Paragraph::new(label).style(
-            ratatui::style::Style::default()
-                .bg(ratatui::style::Color::DarkGray)
-                .fg(ratatui::style::Color::White),
-        );
-        frame.render_widget(overlay, chunks[1]);
+        Mode::Normal => String::new(),
+    };
+    let left_w = left_text.width();
+    // Guarantee at least one blank column between left and right when both
+    // are non-empty so the regions stay visually distinct.
+    let min_gap = if left_w > 0 { 1 } else { 0 };
+
+    let (right_text, right_w) = if left_w + min_gap + right_full <= total {
+        (format!(" {path}  {pct_s} "), right_full)
+    } else if left_w + min_gap + right_path_only <= total {
+        (format!(" {path} "), right_path_only)
+    } else {
+        let max_path = total.saturating_sub(left_w + min_gap + 2);
+        if max_path == 0 {
+            (String::new(), 0)
+        } else {
+            let t = truncate_middle(path, max_path);
+            let w = 1 + t.width() + 1;
+            (format!(" {t} "), w)
+        }
+    };
+
+    let left_budget = total.saturating_sub(right_w);
+    let left_fit = if left_w <= left_budget {
+        left_text
+    } else if left_budget == 0 {
+        String::new()
+    } else {
+        let max = left_budget.saturating_sub(1);
+        let mut out = String::new();
+        let mut w = 0;
+        for c in left_text.chars() {
+            let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+            if w + cw > max {
+                break;
+            }
+            out.push(c);
+            w += cw;
+        }
+        out.push('…');
+        out
+    };
+
+    let pad = total.saturating_sub(left_fit.width() + right_w);
+    let line = format!("{left_fit}{}{right_text}", " ".repeat(pad));
+
+    frame.render_widget(Paragraph::new(line).style(style), area);
+}
+
+/// Theme-aware (bg, fg) pair for the status row.
+fn status_colors(theme: Theme) -> (ratatui::style::Color, ratatui::style::Color) {
+    use ratatui::style::Color;
+    match theme {
+        // Soft gray on near-black — readable without feeling inverted.
+        Theme::Dark => (Color::Indexed(236), Color::Indexed(252)),
+        // Near-black on light gray — same family as style::Colors code_bg (253)
+        // so the status row visually anchors to other light-theme surfaces.
+        Theme::Light => (Color::Indexed(253), Color::Indexed(237)),
     }
+}
+
+/// Middle-truncate `s` to fit `max_cols` display columns, replacing the dropped
+/// span with `…`. Biases toward keeping the tail (e.g. filename) over the head.
+fn truncate_middle(s: &str, max_cols: usize) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if s.width() <= max_cols {
+        return s.to_string();
+    }
+    if max_cols == 0 {
+        return String::new();
+    }
+    if max_cols == 1 {
+        return "…".to_string();
+    }
+    let budget = max_cols - 1; // reserve 1 col for the ellipsis
+    let tail_cols = (budget * 2) / 3;
+    let head_cols = budget - tail_cols;
+
+    let chars: Vec<char> = s.chars().collect();
+    let mut hi = 0usize;
+    let mut hw = 0usize;
+    while hi < chars.len() {
+        let cw = UnicodeWidthChar::width(chars[hi]).unwrap_or(0);
+        if hw + cw > head_cols {
+            break;
+        }
+        hw += cw;
+        hi += 1;
+    }
+    let mut ti = chars.len();
+    let mut tw = 0usize;
+    while ti > hi {
+        let cw = UnicodeWidthChar::width(chars[ti - 1]).unwrap_or(0);
+        if tw + cw > tail_cols {
+            break;
+        }
+        tw += cw;
+        ti -= 1;
+    }
+    let head: String = chars[..hi].iter().collect();
+    let tail: String = chars[ti..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 fn short(s: &str, max: usize) -> String {
@@ -981,5 +1095,44 @@ mod open_link_tests {
         assert!(!looks_like_local_md("file:///a.md"));
         assert!(!looks_like_local_md("other.txt"));
         assert!(!looks_like_local_md(""));
+    }
+}
+
+#[cfg(test)]
+mod truncate_middle_tests {
+    use super::truncate_middle;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn passthrough_when_within_budget() {
+        assert_eq!(truncate_middle("readme.md", 20), "readme.md");
+        assert_eq!(truncate_middle("readme.md", 9), "readme.md");
+    }
+
+    #[test]
+    fn drops_middle_and_keeps_tail_bias() {
+        let out = truncate_middle("docs/superpowers/specs/tui-status-bar.md", 20);
+        assert!(out.contains('…'));
+        assert!(out.width() <= 20);
+        // Filename tail stays visible.
+        assert!(out.ends_with(".md"));
+    }
+
+    #[test]
+    fn respects_cjk_widths() {
+        // Each CJK char is width 2.
+        let s = "文档/测试/读取.md";
+        let out = truncate_middle(s, 10);
+        assert!(out.width() <= 10);
+        assert!(out.contains('…'));
+    }
+
+    #[test]
+    fn edge_cases() {
+        assert_eq!(truncate_middle("abc", 0), "");
+        assert_eq!(truncate_middle("abc", 1), "…");
+        let out = truncate_middle("abcdef", 2);
+        assert_eq!(out.width(), 2);
+        assert!(out.contains('…'));
     }
 }
