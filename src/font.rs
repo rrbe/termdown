@@ -332,8 +332,12 @@ static FONT_SETS: [OnceLock<Option<FontSet>>; 6] = [
 ];
 
 /// Resolve a Latin + CJK + optional emoji font set for the given heading level.
+/// Cached per-level for the process lifetime — the first call's `config` wins;
+/// subsequent calls with a different `config` return the originally-resolved
+/// fonts. Safe today because `Config` is loaded once at startup, but callers
+/// shouldn't rely on per-call config.
 pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
-    let idx = level.clamp(1, 6).saturating_sub(1) as usize;
+    let idx = level.saturating_sub(1).min(5) as usize;
     FONT_SETS[idx]
         .get_or_init(|| resolve_font_set(level, config))
         .as_ref()

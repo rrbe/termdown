@@ -104,9 +104,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut heading_text = String::new();
     let mut images: Vec<HeadingImage> = Vec::new();
     let mut headings: Vec<HeadingEntry> = Vec::new();
-    // Headings whose images still need to be rasterized. We park a text
-    // fallback in the line, then after the parse loop we rasterize all
-    // pending headings in parallel and patch the lines + image table.
+    // Deferred so all H1-H3 rasterizations can run in parallel after the parse.
     struct Pending {
         level: u8,
         text: String,
@@ -157,11 +155,9 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                     line_index: lines.len(),
                 });
 
-                // Always seed the line with the bold text fallback. If the
-                // heading is H1-H3, queue it for parallel rasterization after
-                // the parser loop; on success we'll overwrite the spans with
-                // a HeadingImage. On failure (font load fails, etc.), the
-                // fallback stays.
+                // Seed with the bold-text fallback; the parallel pass below
+                // overwrites it with a HeadingImage span on rasterization
+                // success, leaves it as-is on failure.
                 let fallback_spans = vec![Span::Text {
                     content: text.clone(),
                     style: Style {
@@ -587,22 +583,18 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
         }
     }
 
-    // Rasterize all H1-H3 headings in parallel. PNG encoding + glyph layout
-    // is pure CPU and trivially parallel; sequencing it after the parse keeps
-    // the hot path off the parser thread and lets us scale across cores.
     let results: Vec<Option<(Vec<u8>, u32, u32)>> = pending_headings
         .par_iter()
         .map(|p| crate::render::render_heading(&p.text, p.level, config, theme))
         .collect();
 
-    // Splice results back in document order so image IDs are deterministic.
+    // Walk in document order so image IDs are deterministic across runs.
     let mut next_image_id: u32 = 1;
     for (p, result) in pending_headings.into_iter().zip(results) {
         if let Some((png, px_width, px_height)) = result {
             let id = next_image_id;
             next_image_id += 1;
-            // Conservative row estimate; refined by the TUI once the real
-            // terminal cell pixel height is known.
+            // Conservative upper bound; TUI refines once it knows cell pixel height.
             let rows = match p.level {
                 1 => 6,
                 2 => 4,
