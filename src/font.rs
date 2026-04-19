@@ -317,8 +317,29 @@ fn resolve_optional_font(
     None
 }
 
+/// Per-level cache of resolved font sets. `Config` is loaded once at startup
+/// and is constant for the process lifetime, so a level → FontSet mapping is
+/// safe to memoize. `SystemSource::new()` and the family-resolution walk are
+/// the dominant cost in heading rasterization (~30–40ms each on macOS), and
+/// without this cache they were re-paid for every H1–H3 in the document.
+static FONT_SETS: [OnceLock<Option<FontSet>>; 6] = [
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+];
+
 /// Resolve a Latin + CJK + optional emoji font set for the given heading level.
-pub fn get_fonts(level: u8, config: &Config) -> Option<FontSet> {
+pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
+    let idx = level.clamp(1, 6).saturating_sub(1) as usize;
+    FONT_SETS[idx]
+        .get_or_init(|| resolve_font_set(level, config))
+        .as_ref()
+}
+
+fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
     let source = SystemSource::new();
     let props = Properties {
         style: Style::Normal,

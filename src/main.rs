@@ -118,9 +118,11 @@ fn main() {
 
     #[cfg(unix)]
     {
-        render::drain_kitty_responses();
         if let Some(saved) = saved_termios {
+            render::drain_iterm2_acks();
             restore_termios(&saved);
+        } else {
+            render::flush_stdin();
         }
     }
 }

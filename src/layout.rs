@@ -1,4 +1,5 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use rayon::prelude::*;
 
 use crate::config::Config;
 use crate::render::HeadingImage;
@@ -101,9 +102,17 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut pending_link_url: Option<String> = None;
     let mut heading_level: u8 = 0;
     let mut heading_text = String::new();
-    let mut next_image_id: u32 = 1;
     let mut images: Vec<HeadingImage> = Vec::new();
     let mut headings: Vec<HeadingEntry> = Vec::new();
+    // Headings whose images still need to be rasterized. We park a text
+    // fallback in the line, then after the parse loop we rasterize all
+    // pending headings in parallel and patch the lines + image table.
+    struct Pending {
+        level: u8,
+        text: String,
+        line_index: usize,
+    }
+    let mut pending_headings: Vec<Pending> = Vec::new();
     let mut quote_depth: u8 = 0;
     let mut list_stack: Vec<ListState> = Vec::new();
     let mut in_code_block: Option<Option<String>> = None;
@@ -148,59 +157,33 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                     line_index: lines.len(),
                 });
 
-                let (id_for_kind, heading_spans): (Option<u32>, Vec<Span>) = if heading_level <= 3 {
-                    match crate::render::render_heading(&text, heading_level, config, theme) {
-                        Some((png, px_width, px_height)) => {
-                            let id = next_image_id;
-                            next_image_id += 1;
-                            // Conservative row estimate; refined by the TUI
-                            // once the real terminal cell pixel height is known.
-                            let rows = match heading_level {
-                                1 => 6,
-                                2 => 4,
-                                _ => 3,
-                            };
-                            images.push(HeadingImage {
-                                id,
-                                png,
-                                cols: 0,
-                                rows,
-                                px_width,
-                                px_height,
-                            });
-                            (Some(id), vec![Span::HeadingImage { id, rows }])
-                        }
-                        None => (
-                            None,
-                            vec![Span::Text {
-                                content: text.clone(),
-                                style: Style {
-                                    bold: true,
-                                    ..Style::default()
-                                },
-                            }],
-                        ),
-                    }
-                } else {
-                    (
-                        None,
-                        vec![Span::Text {
-                            content: text.clone(),
-                            style: Style {
-                                bold: true,
-                                ..Style::default()
-                            },
-                        }],
-                    )
-                };
-
+                // Always seed the line with the bold text fallback. If the
+                // heading is H1-H3, queue it for parallel rasterization after
+                // the parser loop; on success we'll overwrite the spans with
+                // a HeadingImage. On failure (font load fails, etc.), the
+                // fallback stays.
+                let fallback_spans = vec![Span::Text {
+                    content: text.clone(),
+                    style: Style {
+                        bold: true,
+                        ..Style::default()
+                    },
+                }];
+                let line_index = lines.len();
                 lines.push(Line {
-                    spans: heading_spans,
+                    spans: fallback_spans,
                     kind: LineKind::Heading {
                         level: heading_level,
-                        id: id_for_kind,
+                        id: None,
                     },
                 });
+                if heading_level <= 3 {
+                    pending_headings.push(Pending {
+                        level: heading_level,
+                        text,
+                        line_index,
+                    });
+                }
                 heading_level = 0;
             }
             Event::Start(Tag::Paragraph) if quote_depth == 0 && !in_item => {
@@ -601,6 +584,44 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             }
 
             _ => {}
+        }
+    }
+
+    // Rasterize all H1-H3 headings in parallel. PNG encoding + glyph layout
+    // is pure CPU and trivially parallel; sequencing it after the parse keeps
+    // the hot path off the parser thread and lets us scale across cores.
+    let results: Vec<Option<(Vec<u8>, u32, u32)>> = pending_headings
+        .par_iter()
+        .map(|p| crate::render::render_heading(&p.text, p.level, config, theme))
+        .collect();
+
+    // Splice results back in document order so image IDs are deterministic.
+    let mut next_image_id: u32 = 1;
+    for (p, result) in pending_headings.into_iter().zip(results) {
+        if let Some((png, px_width, px_height)) = result {
+            let id = next_image_id;
+            next_image_id += 1;
+            // Conservative row estimate; refined by the TUI once the real
+            // terminal cell pixel height is known.
+            let rows = match p.level {
+                1 => 6,
+                2 => 4,
+                _ => 3,
+            };
+            images.push(HeadingImage {
+                id,
+                png,
+                cols: 0,
+                rows,
+                px_width,
+                px_height,
+            });
+            let line = &mut lines[p.line_index];
+            line.spans = vec![Span::HeadingImage { id, rows }];
+            line.kind = LineKind::Heading {
+                level: p.level,
+                id: Some(id),
+            };
         }
     }
 

@@ -17,6 +17,7 @@ font-kit = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pulldown-cmark = "0.13"
 ratatui = "0.29"
+rayon = "1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 terminal_size = "0.4"

@@ -287,7 +287,7 @@ pub fn render_heading(
         y: st.size,
     };
 
-    let metrics = measure_text(&fonts, scale, text, st.tracking);
+    let metrics = measure_text(fonts, scale, text, st.tracking);
 
     let img_w = (metrics.width as u32 + st.pad_x * 2).max(1);
     let img_h = (metrics.height as u32 + st.pad_top + st.pad_bottom).max(1);
@@ -303,7 +303,7 @@ pub fn render_heading(
     let baseline_y = st.pad_top as f32 + metrics.ascent;
     draw_text(
         &mut img,
-        &fonts,
+        fonts,
         scale,
         (st.pad_x as f32, baseline_y),
         text,
@@ -320,15 +320,24 @@ pub fn render_heading(
 
 // ─── Kitty Graphics Protocol ────────────────────────────────────────────────
 
-/// Drain any Kitty graphics protocol responses from stdin.
-/// Terminals like iTerm2 send back `OK` acknowledgments that leak as visible text.
+/// Discard any pending bytes on stdin without blocking. Cheap; safe to call
+/// unconditionally at end of cat-mode.
 #[cfg(unix)]
-pub fn drain_kitty_responses() {
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    // SAFETY: tcflush is a standard POSIX call on valid fd.
+pub fn flush_stdin() {
+    // SAFETY: tcflush is a standard POSIX call on a process-owned fd.
     unsafe {
         libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
     }
+}
+
+/// iTerm2 ignores the Kitty `q=2` response-suppression flag and emits `OK`
+/// ACKs anyway. Wait briefly so those bytes reach the input buffer, then
+/// discard them. Only call under iTerm2 — the 50ms sleep is wasted overhead
+/// on terminals (Ghostty/Kitty/WezTerm) that respect `q=2`.
+#[cfg(unix)]
+pub fn drain_iterm2_acks() {
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    flush_stdin();
 }
 
 /// Encode PNG data as a Kitty graphics protocol escape sequence.
