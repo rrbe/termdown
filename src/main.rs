@@ -105,19 +105,23 @@ fn main() {
 
     let colors = crate::style::Colors::for_theme(theme);
 
-    // Disable terminal echo so Kitty graphics protocol responses
-    // (e.g. iTerm2's OK acknowledgments) don't appear on screen.
+    // iTerm2 ignores the Kitty `q=2` response-suppression flag and sends OK
+    // ACKs anyway; disable ECHO there so they don't leak to the screen. Other
+    // terminals (Ghostty, Kitty, WezTerm) respect `q=2` — leave ECHO alone so
+    // we don't trip Ghostty's Secure Keyboard Entry auto-enable heuristic,
+    // which treats `~ECHO` as a password prompt.
     #[cfg(unix)]
-    let saved_termios = disable_echo();
+    let saved_termios = needs_echo_suppression().then(disable_echo);
 
     let doc = layout::build(&md, &config, theme);
     cat::print(&doc, term_width, &colors);
 
-    // Drain any pending responses, then restore terminal state.
     #[cfg(unix)]
     {
         render::drain_kitty_responses();
-        restore_termios(&saved_termios);
+        if let Some(saved) = saved_termios {
+            restore_termios(&saved);
+        }
     }
 }
 
@@ -142,6 +146,13 @@ fn check_terminal_support() {
 }
 
 // ─── UNIX Terminal State ────────────────────────────────────────────────────
+
+#[cfg(unix)]
+fn needs_echo_suppression() -> bool {
+    std::env::var("TERM_PROGRAM")
+        .map(|v| v.eq_ignore_ascii_case("iTerm.app"))
+        .unwrap_or(false)
+}
 
 #[cfg(unix)]
 fn disable_echo() -> libc::termios {
