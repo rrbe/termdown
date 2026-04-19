@@ -343,8 +343,14 @@ pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
         .as_ref()
 }
 
+/// Shared across heading levels — `SystemSource::new()` walks the OS font
+/// registry (CoreText / fontconfig / DirectWrite), which costs ~20-30ms on
+/// macOS and gets paid once per cache miss in `resolve_font_set`. With three
+/// heading levels that's two extra walks we don't need.
+static SYSTEM_SOURCE: OnceLock<SystemSource> = OnceLock::new();
+
 fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
-    let source = SystemSource::new();
+    let source = SYSTEM_SOURCE.get_or_init(SystemSource::new);
     let props = Properties {
         style: Style::Normal,
         weight: weight_for_level(level),
@@ -357,21 +363,21 @@ fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
     };
 
     let latin = resolve_font(
-        &source,
+        source,
         &props,
         config.font.heading.latin.as_deref(),
         preferred_latin_families(),
     )?;
 
     let cjk = resolve_font(
-        &source,
+        source,
         &props,
         config.font.heading.cjk.as_deref(),
         preferred_cjk_families(),
     )?;
 
     let emoji = resolve_optional_font(
-        &source,
+        source,
         &emoji_props,
         config.font.heading.emoji.as_deref(),
         preferred_emoji_families(),
