@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
@@ -343,47 +344,52 @@ pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
         .as_ref()
 }
 
-/// Shared across heading levels — `SystemSource::new()` walks the OS font
-/// registry (CoreText / fontconfig / DirectWrite), which costs ~20-30ms on
-/// macOS and gets paid once per cache miss in `resolve_font_set`. With three
-/// heading levels that's two extra walks we don't need.
-static SYSTEM_SOURCE: OnceLock<SystemSource> = OnceLock::new();
+// Shared across heading levels within a thread. `SystemSource::new()` walks
+// the OS font registry (CoreText / fontconfig / DirectWrite), ~20-30ms per
+// call, and we'd otherwise pay it once per heading level. Thread-local
+// instead of `static` because on Linux `SystemSource` wraps a raw
+// `*mut FcConfig` pointer and is neither `Send` nor `Sync`.
+thread_local! {
+    static SYSTEM_SOURCE: OnceCell<SystemSource> = const { OnceCell::new() };
+}
 
 fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
-    let source = SYSTEM_SOURCE.get_or_init(SystemSource::new);
-    let props = Properties {
-        style: Style::Normal,
-        weight: weight_for_level(level),
-        stretch: Stretch::NORMAL,
-    };
-    let emoji_props = Properties {
-        style: Style::Normal,
-        weight: Weight::NORMAL,
-        stretch: Stretch::NORMAL,
-    };
+    SYSTEM_SOURCE.with(|cell| {
+        let source = cell.get_or_init(SystemSource::new);
+        let props = Properties {
+            style: Style::Normal,
+            weight: weight_for_level(level),
+            stretch: Stretch::NORMAL,
+        };
+        let emoji_props = Properties {
+            style: Style::Normal,
+            weight: Weight::NORMAL,
+            stretch: Stretch::NORMAL,
+        };
 
-    let latin = resolve_font(
-        source,
-        &props,
-        config.font.heading.latin.as_deref(),
-        preferred_latin_families(),
-    )?;
+        let latin = resolve_font(
+            source,
+            &props,
+            config.font.heading.latin.as_deref(),
+            preferred_latin_families(),
+        )?;
 
-    let cjk = resolve_font(
-        source,
-        &props,
-        config.font.heading.cjk.as_deref(),
-        preferred_cjk_families(),
-    )?;
+        let cjk = resolve_font(
+            source,
+            &props,
+            config.font.heading.cjk.as_deref(),
+            preferred_cjk_families(),
+        )?;
 
-    let emoji = resolve_optional_font(
-        source,
-        &emoji_props,
-        config.font.heading.emoji.as_deref(),
-        preferred_emoji_families(),
-    );
+        let emoji = resolve_optional_font(
+            source,
+            &emoji_props,
+            config.font.heading.emoji.as_deref(),
+            preferred_emoji_families(),
+        );
 
-    Some(FontSet { latin, cjk, emoji })
+        Some(FontSet { latin, cjk, emoji })
+    })
 }
 
 #[cfg(test)]
