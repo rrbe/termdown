@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check lint test build check all
+.PHONY: help fmt fmt-check lint test build build-release check all
 
 CARGO ?= cargo
 
@@ -9,6 +9,7 @@ help:
 	@echo "  lint       - clippy on all targets, warnings as errors (CI gate)"
 	@echo "  test       - cargo test"
 	@echo "  build      - cargo build --all-targets"
+	@echo "  build-release - cargo build --release"
 	@echo "  check      - fmt-check + lint + test (run before pushing)"
 	@echo "  all        - fmt + check + build"
 
@@ -26,6 +27,9 @@ test:
 
 build:
 	$(CARGO) build --all-targets
+
+build-release:
+	$(CARGO) build --release
 
 check: fmt-check lint test
 
