@@ -819,12 +819,34 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
                 ratatui::widgets::ListItem::new(format!("{indent}{}", h.text))
             })
             .collect();
-        let toc = ratatui::widgets::List::new(toc_items).block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::RIGHT)
-                .title("Contents"),
-        );
-        frame.render_widget(toc, split[0]);
+        // Highlight the heading the viewport is currently inside: the last
+        // heading whose logical line is at or above the top visible line.
+        // `render_stateful_widget` auto-scrolls the sidebar so the selected
+        // entry stays visible in long docs.
+        let selected = active
+            .viewport
+            .visible()
+            .first()
+            .map(|vl| vl.logical_index)
+            .and_then(|top| {
+                active
+                    .doc
+                    .headings
+                    .iter()
+                    .rposition(|h| h.line_index <= top)
+            });
+        let toc = ratatui::widgets::List::new(toc_items)
+            .block(
+                ratatui::widgets::Block::default()
+                    .borders(ratatui::widgets::Borders::RIGHT)
+                    .title("Contents"),
+            )
+            .highlight_style(
+                ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED),
+            );
+        let mut toc_state = ratatui::widgets::ListState::default();
+        toc_state.select(selected);
+        frame.render_stateful_widget(toc, split[0], &mut toc_state);
         split[1]
     } else {
         chunks[0]
