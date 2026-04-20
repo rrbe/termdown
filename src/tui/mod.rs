@@ -463,7 +463,7 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                     }
                 }
             }
-            input::Action::ToggleHelp => {
+            input::Action::OpenHelp => {
                 app.mode = Mode::Help;
                 app.needs_full_redraw = true;
             }
@@ -482,10 +482,7 @@ fn handle_help_key(app: &mut App, ev: Event) -> io::Result<()> {
         return Ok(());
     }
     match key.code {
-        event::KeyCode::Char('?')
-        | event::KeyCode::Esc
-        | event::KeyCode::Char('q')
-        | event::KeyCode::Enter => {
+        event::KeyCode::Char('?') | event::KeyCode::Esc | event::KeyCode::Char('q') => {
             app.mode = Mode::Normal;
             app.needs_full_redraw = true;
         }
@@ -1328,6 +1325,72 @@ mod open_link_tests {
         assert!(!looks_like_local_md("file:///a.md"));
         assert!(!looks_like_local_md("other.txt"));
         assert!(!looks_like_local_md(""));
+    }
+}
+
+#[cfg(test)]
+mod help_popup_tests {
+    use super::{help_popup_intrinsic_size, help_popup_rect};
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn intrinsic_size_is_positive_and_bounded() {
+        let (w, h) = help_popup_intrinsic_size();
+        assert!(w > 4, "width should include border+padding, got {w}");
+        assert!(
+            h > 2,
+            "height should include at least one content row, got {h}"
+        );
+        // Sanity: the popup is small enough to fit inside a typical 80x24 terminal.
+        assert!(w <= 80);
+        assert!(h <= 24);
+    }
+
+    #[test]
+    fn popup_centers_within_body() {
+        let body = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        };
+        let p = help_popup_rect(body);
+        // Left and right gutters should be equal within 1 cell (rounding).
+        let right_gutter = body.width - (p.x + p.width);
+        assert!(p.x.abs_diff(right_gutter) <= 1);
+        let bottom_gutter = body.height - (p.y + p.height);
+        assert!(p.y.abs_diff(bottom_gutter) <= 1);
+    }
+
+    #[test]
+    fn popup_caps_at_ninety_percent_of_tiny_body() {
+        // Tiny body: popup should cap at 90% and still fit.
+        let body = Rect {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 10,
+        };
+        let p = help_popup_rect(body);
+        assert!(p.width <= 27, "width {} should cap at 90% of 30", p.width);
+        assert!(p.height <= 9, "height {} should cap at 90% of 10", p.height);
+        assert!(p.x + p.width <= body.x + body.width);
+        assert!(p.y + p.height <= body.y + body.height);
+    }
+
+    #[test]
+    fn popup_respects_body_offset() {
+        let body = Rect {
+            x: 10,
+            y: 5,
+            width: 80,
+            height: 30,
+        };
+        let p = help_popup_rect(body);
+        assert!(p.x >= body.x);
+        assert!(p.y >= body.y);
+        assert!(p.x + p.width <= body.x + body.width);
+        assert!(p.y + p.height <= body.y + body.height);
     }
 }
 
