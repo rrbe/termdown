@@ -8,32 +8,59 @@
 
 glow 是优秀的终端 Markdown 渲染器，但标题只能用 ANSI 粗体/颜色区分，无法真正放大显示。mdfried 支持图片化标题，但需要进入 TUI 模式。
 
-termdown 的目标很简单：**像 `cat` 一样轻量，但标题能真正大写化显示**。它将 H1-H3 标题栅格化为 PNG 图片，通过 Kitty 图形协议直接输出到终端，无需 TUI，管道友好。
+termdown 将 H1-H3 标题栅格化为 PNG 图片，通过 Kitty 图形协议直接绘制到终端。同一套渲染器之上提供两种模式：
 
-## 终端支持
+- **直接输出** —— 像 `cat` 一样轻量、管道友好，把渲染后的 Markdown 直接打到终端。
+- **交互式 TUI**（`--tui`）—— 类 vim 的浏览器，支持搜索、目录、链接跳转，适合阅读较长文档。
 
-需要支持 **Kitty 图形协议** 的终端：
-
-- [Ghostty](https://ghostty.org)
-- [Kitty](https://sw.kovidgoyal.net/kitty/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
-- [iTerm2](https://iterm2.com)
-
-不支持的终端会打印警告。H4-H6 标题始终以 ANSI 粗体文本渲染。
+H4-H6 标题始终以 ANSI 粗体文本渲染。
 
 ## 安装
 
-### 从源码安装
+### 下载预编译二进制
+
+从 [Releases 页面](https://github.com/rrbe/termdown/releases/latest) 下载对应平台的归档文件。
+
+支持的平台：`aarch64-apple-darwin`、`x86_64-apple-darwin`、`aarch64-unknown-linux-gnu`、`x86_64-unknown-linux-gnu`、`x86_64-pc-windows-msvc`。
+
+以 macOS arm64 为例：
 
 ```sh
-cargo install --path .
+TARGET=aarch64-apple-darwin
+BASE="https://github.com/rrbe/termdown/releases/latest/download"
+
+curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
+curl -LO "${BASE}/SHA256SUMS"
+grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+
+tar xzf "termdown-${TARGET}.tar.gz"
+sudo mv termdown /usr/local/bin/
 ```
 
-### 手动构建
+### 从源码安装
+
+暂未发布到 crates.io —— 克隆仓库后用 cargo 构建：
+
+```sh
+git clone https://github.com/rrbe/termdown.git
+cd termdown
+cargo install --path .    # 安装到 ~/.cargo/bin/
+```
+
+如果想装到其他路径：
 
 ```sh
 cargo build --release
 cp target/release/termdown /usr/local/bin/
+```
+
+## 卸载
+
+删除二进制文件和配置目录：
+
+```sh
+rm $(which termdown)
+rm -rf ~/.termdown
 ```
 
 ## 使用
@@ -129,14 +156,16 @@ H1-H3 标题中的单个 emoji 也会通过 fallback 字体尽量渲染出来。
 | Songti SC | Noto Serif | Microsoft YaHei |
 | STSong | DejaVu Serif | |
 
-## 卸载
+## 终端支持
 
-删除二进制文件和配置目录：
+需要支持 **Kitty 图形协议** 的终端：
 
-```sh
-rm $(which termdown)
-rm -rf ~/.termdown
-```
+- [Ghostty](https://ghostty.org)
+- [Kitty](https://sw.kovidgoyal.net/kitty/)
+- [WezTerm](https://wezfurlong.org/wezterm/)
+- [iTerm2](https://iterm2.com)
+
+不支持的终端会打印警告。H4-H6 标题始终以 ANSI 粗体文本渲染。
 
 ## 已知问题
 

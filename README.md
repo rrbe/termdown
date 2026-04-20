@@ -10,32 +10,59 @@ Inspired by [glow](https://github.com/charmbracelet/glow) and [mdfried](https://
 
 glow is a great terminal Markdown renderer, but headings are only distinguished by ANSI bold/color -- they can't actually be displayed at a larger size. mdfried supports image-rendered headings, but requires entering a TUI.
 
-termdown aims to be **a lightweight `cat`-like tool where headings are truly rendered large**. It rasterizes H1-H3 text as PNG images and displays them via the Kitty graphics protocol -- no TUI, pipe-friendly, just direct output.
+termdown rasterizes H1-H3 headings as PNG and paints them via the Kitty graphics protocol. Two modes share the same renderer:
 
-## Terminal Support
+- **Direct output** -- `cat`-like, pipe-friendly; dump rendered Markdown straight into your terminal.
+- **Interactive TUI** (`--tui`) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
 
-Requires a terminal with **Kitty graphics protocol** support:
-
-- [Ghostty](https://ghostty.org)
-- [Kitty](https://sw.kovidgoyal.net/kitty/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
-- [iTerm2](https://iterm2.com)
-
-On unsupported terminals, termdown will print a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
+H4-H6 headings always fall back to ANSI bold text.
 
 ## Installation
 
-### From source
+### Download prebuilt binary
+
+Download the latest archive for your platform from the [Releases page](https://github.com/rrbe/termdown/releases/latest).
+
+Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`.
+
+Example (macOS arm64):
 
 ```sh
-cargo install --path .
+TARGET=aarch64-apple-darwin
+BASE="https://github.com/rrbe/termdown/releases/latest/download"
+
+curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
+curl -LO "${BASE}/SHA256SUMS"
+grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+
+tar xzf "termdown-${TARGET}.tar.gz"
+sudo mv termdown /usr/local/bin/
 ```
 
-### Build manually
+### Install from source
+
+Not yet published on crates.io -- clone the repo and build with cargo:
+
+```sh
+git clone https://github.com/rrbe/termdown.git
+cd termdown
+cargo install --path .    # installs into ~/.cargo/bin/
+```
+
+If you prefer a custom install path:
 
 ```sh
 cargo build --release
 cp target/release/termdown /usr/local/bin/
+```
+
+## Uninstall
+
+Remove the binary and delete the configuration directory:
+
+```sh
+rm $(which termdown)
+rm -rf ~/.termdown
 ```
 
 ## Usage
@@ -131,14 +158,16 @@ If no config file exists, termdown uses platform-specific defaults and falls bac
 | Songti SC | Noto Serif | Microsoft YaHei |
 | STSong | DejaVu Serif | |
 
-## Uninstall
+## Terminal Support
 
-Remove the binary and delete the configuration directory:
+Requires a terminal with **Kitty graphics protocol** support:
 
-```sh
-rm $(which termdown)
-rm -rf ~/.termdown
-```
+- [Ghostty](https://ghostty.org)
+- [Kitty](https://sw.kovidgoyal.net/kitty/)
+- [WezTerm](https://wezfurlong.org/wezterm/)
+- [iTerm2](https://iterm2.com)
+
+On unsupported terminals, termdown will print a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
 
 ## Known Issues
 
