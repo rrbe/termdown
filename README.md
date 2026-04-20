@@ -25,7 +25,7 @@ H4-H6 headings always fall back to ANSI bold text.
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
-Defaults to `/usr/local/bin`. Override with `TERMDOWN_VERSION` (release tag) or `TERMDOWN_INSTALL_DIR` (install path).
+Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTALL_DIR`.
 
 <details>
 <summary>Manual download (no script)</summary>
@@ -46,20 +46,11 @@ sudo mv termdown /usr/local/bin/
 
 ### Install from source
 
-Not yet published on crates.io -- clone the repo and build with cargo:
-
 ```sh
-git clone https://github.com/rrbe/termdown.git
-cd termdown
-cargo install --path .    # installs into ~/.cargo/bin/
+cargo install --git https://github.com/rrbe/termdown
 ```
 
-If you prefer a custom install path:
-
-```sh
-cargo build --release
-cp target/release/termdown /usr/local/bin/
-```
+Installs into `~/.cargo/bin/`.
 
 ## Uninstall
 

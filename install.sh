@@ -9,14 +9,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 #
 # Environment variables:
-#   TERMDOWN_VERSION       release tag to install (default: latest)
 #   TERMDOWN_INSTALL_DIR   install directory (default: /usr/local/bin)
 
 set -euo pipefail
 
 REPO="rrbe/termdown"
-VERSION="${TERMDOWN_VERSION:-latest}"
 INSTALL_DIR="${TERMDOWN_INSTALL_DIR:-/usr/local/bin}"
+BASE="https://github.com/${REPO}/releases/latest/download"
 
 info() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -44,13 +43,7 @@ esac
 TARGET="${ARCH_STR}-${OS_STR}"
 ARCHIVE="termdown-${TARGET}.tar.gz"
 
-if [ "$VERSION" = "latest" ]; then
-  BASE="https://github.com/${REPO}/releases/latest/download"
-else
-  BASE="https://github.com/${REPO}/releases/download/${VERSION}"
-fi
-
-info "Installing termdown (${VERSION}, ${TARGET})"
+info "Installing termdown (${TARGET})"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
