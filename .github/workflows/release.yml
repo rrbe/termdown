@@ -103,3 +103,5 @@ jobs:
           files: |
             artifacts/termdown-*
             artifacts/SHA256SUMS
+            install.sh
+            uninstall.sh

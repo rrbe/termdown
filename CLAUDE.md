@@ -28,3 +28,13 @@ If `make check` fails, fix the underlying issue — do not bypass with `#[allow(
 ### When you add a new build/lint/test command
 
 Add it as a Makefile target first, then reference the target from CI. Never let CI and local commands diverge.
+
+## Git workflow
+
+**Do not commit or push to `master` directly.** All changes land on `master` via PR merges. For any code or docs change:
+
+1. Create a feature branch (e.g. `feat/...`, `fix/...`, `docs/...`).
+2. Commit there, push the branch, open a PR.
+3. Never run `git commit` while `HEAD` is on `master`, and never run `git push origin master` — even for "small" doc tweaks. Committing to local master (even without pushing) tends to contaminate the merge base of later feature branches.
+
+If you notice you're on `master` with uncommitted changes, stash them, switch to a new branch, and pop the stash before committing.

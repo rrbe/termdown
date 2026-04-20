@@ -4,39 +4,76 @@
 
 Render Markdown with large-font headings in the terminal using the Kitty graphics protocol.
 
+<table>
+<tr>
+<td><img src="docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
+<td><img src="docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
+</tr>
+</table>
+
 ## Motivation
 
 Inspired by [glow](https://github.com/charmbracelet/glow) and [mdfried](https://github.com/benjajaja/mdfried).
 
 glow is a great terminal Markdown renderer, but headings are only distinguished by ANSI bold/color -- they can't actually be displayed at a larger size. mdfried supports image-rendered headings, but requires entering a TUI.
 
-termdown aims to be **a lightweight `cat`-like tool where headings are truly rendered large**. It rasterizes H1-H3 text as PNG images and displays them via the Kitty graphics protocol -- no TUI, pipe-friendly, just direct output.
+termdown rasterizes H1-H3 headings as PNG and paints them via the Kitty graphics protocol. Two modes share the same renderer:
 
-## Terminal Support
+- **Direct output** -- `cat`-like, pipe-friendly; dump rendered Markdown straight into your terminal.
+- **Interactive TUI** (`--tui`) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
 
-Requires a terminal with **Kitty graphics protocol** support:
-
-- [Ghostty](https://ghostty.org)
-- [Kitty](https://sw.kovidgoyal.net/kitty/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
-- [iTerm2](https://iterm2.com)
-
-On unsupported terminals, termdown will print a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
+H4-H6 headings always fall back to ANSI bold text.
 
 ## Installation
 
-### From source
+### Install script
 
 ```sh
-cargo install --path .
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
-### Build manually
+Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTALL_DIR`.
+
+<details>
+<summary>Manual download (no script)</summary>
 
 ```sh
-cargo build --release
-cp target/release/termdown /usr/local/bin/
+TARGET=aarch64-apple-darwin
+BASE="https://github.com/rrbe/termdown/releases/latest/download"
+
+curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
+curl -LO "${BASE}/SHA256SUMS"
+grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+
+tar xzf "termdown-${TARGET}.tar.gz"
+sudo mv termdown /usr/local/bin/
 ```
+
+</details>
+
+### Install from source
+
+```sh
+cargo install --git https://github.com/rrbe/termdown
+```
+
+Installs into `~/.cargo/bin/`.
+
+## Uninstall
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
+```
+
+<details>
+<summary>Manual uninstall</summary>
+
+```sh
+rm $(which termdown)
+rm -rf ~/.termdown
+```
+
+</details>
 
 ## Usage
 
@@ -50,7 +87,7 @@ cat notes.md | termdown
 # Use a specific theme instead of auto-detect
 termdown --theme light README.md
 
-# Flags
+# View help
 termdown --help
 termdown --version
 ```
@@ -94,18 +131,18 @@ termdown reads configuration from `~/.termdown/config.toml`.
 theme = "auto"
 
 [font.heading]
-# Font for Latin/English text in H1-H3 headings (sans-serif recommended)
+# English heading font (sans-serif recommended)
 latin = "Inter"
 
-# Font for CJK text in H1-H3 headings
+# CJK heading font
 cjk = "LXGW WenKai"
 
-# Optional emoji / symbol fallback font for image-rendered headings
+# Emoji / symbol fallback font for image-rendered headings (optional)
 emoji = "Apple Color Emoji"
 ```
 
 Headings with mixed scripts (e.g. "Hello 世界") will render each character with the appropriate font automatically.
-Standalone emoji in H1-H3 headings are also supported through font fallback when the selected emoji font exposes outline or raster glyphs.
+Standalone emoji in H1-H3 headings are also rendered via font fallback where possible.
 
 > **Note:** Body text is rendered as plain ANSI text -- its font is determined by your terminal emulator settings, not by termdown. To change the body font, configure your terminal directly.
 
@@ -131,14 +168,16 @@ If no config file exists, termdown uses platform-specific defaults and falls bac
 | Songti SC | Noto Serif | Microsoft YaHei |
 | STSong | DejaVu Serif | |
 
-## Uninstall
+## Terminal Support
 
-Remove the binary and delete the configuration directory:
+Requires a terminal with **Kitty graphics protocol** support:
 
-```sh
-rm $(which termdown)
-rm -rf ~/.termdown
-```
+- [Ghostty](https://ghostty.org)
+- [Kitty](https://sw.kovidgoyal.net/kitty/)
+- [WezTerm](https://wezfurlong.org/wezterm/)
+- [iTerm2](https://iterm2.com)
+
+On unsupported terminals, termdown will print a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
 
 ## Known Issues
 
