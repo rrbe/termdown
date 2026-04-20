@@ -4,6 +4,13 @@
 
 Render Markdown with large-font headings in the terminal using the Kitty graphics protocol.
 
+<table>
+<tr>
+<td><img src="docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
+<td><img src="docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
+</tr>
+</table>
+
 ## Motivation
 
 Inspired by [glow](https://github.com/charmbracelet/glow) and [mdfried](https://github.com/benjajaja/mdfried).
@@ -80,7 +87,7 @@ cat notes.md | termdown
 # Use a specific theme instead of auto-detect
 termdown --theme light README.md
 
-# Flags
+# View help
 termdown --help
 termdown --version
 ```
@@ -124,18 +131,18 @@ termdown reads configuration from `~/.termdown/config.toml`.
 theme = "auto"
 
 [font.heading]
-# Font for Latin/English text in H1-H3 headings (sans-serif recommended)
+# English heading font (sans-serif recommended)
 latin = "Inter"
 
-# Font for CJK text in H1-H3 headings
+# CJK heading font
 cjk = "LXGW WenKai"
 
-# Optional emoji / symbol fallback font for image-rendered headings
+# Emoji / symbol fallback font for image-rendered headings (optional)
 emoji = "Apple Color Emoji"
 ```
 
 Headings with mixed scripts (e.g. "Hello 世界") will render each character with the appropriate font automatically.
-Standalone emoji in H1-H3 headings are also supported through font fallback when the selected emoji font exposes outline or raster glyphs.
+Standalone emoji in H1-H3 headings are also rendered via font fallback where possible.
 
 > **Note:** Body text is rendered as plain ANSI text -- its font is determined by your terminal emulator settings, not by termdown. To change the body font, configure your terminal directly.
 

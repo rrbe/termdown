@@ -2,6 +2,13 @@
 
 在终端中以大字体标题渲染 Markdown，让观感更接近 GUI Markdown 阅读器的体验，基于 Kitty 图形协议。
 
+<table>
+<tr>
+<td><img src="docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown 渲染中文 README" /></td>
+<td><img src="docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui 渲染英文 README" /></td>
+</tr>
+</table>
+
 ## 为什么做这个
 
 本项目受 [glow](https://github.com/charmbracelet/glow) 和 [mdfried](https://github.com/benjajaja/mdfried) 启发。
