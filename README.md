@@ -147,6 +147,7 @@ rm -rf ~/.termdown
 - **Font selection & fallback** -- weight matching relies on platform font APIs (Core Text / fontconfig) which may not always resolve to the expected variant
 - **Theme detection** -- auto-detection relies on OSC 11 terminal responses; if your terminal does not support this, use `--theme` or the config file to set the theme manually
 - **Complex emoji sequences** -- ZWJ-heavy emoji sequences (family/grouping variants, some skin-tone combinations) may still render as separate glyphs because heading layout does not perform full text shaping
+- **TUI help popup vs heading images** -- in TUI mode, the `?` help overlay is drawn on the text layer, while heading images live on Kitty's graphics layer (always on top of text). Any heading image overlapping the popup area is temporarily removed while the popup is open and restored when it closes -- this is a Kitty graphics protocol limitation, not a bug
 
 ## License
 

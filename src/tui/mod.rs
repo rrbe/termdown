@@ -36,6 +36,7 @@ enum Mode {
     LinkSelect {
         links: Vec<(String, String)>, // (label_content, url)
     },
+    Help,
 }
 
 /// A single loaded document with its own view state. `App` holds a stack of
@@ -338,6 +339,7 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
                 Mode::Normal => handle_normal_key(app, &ev)?,
                 Mode::Search { .. } => handle_search_key(app, ev)?,
                 Mode::LinkSelect { .. } => handle_link_select_key(app, ev)?,
+                Mode::Help => handle_help_key(app, ev)?,
             }
             if app.should_quit {
                 return Ok(());
@@ -461,9 +463,36 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                     }
                 }
             }
+            input::Action::ToggleHelp => {
+                app.mode = Mode::Help;
+                app.needs_full_redraw = true;
+            }
             // Other actions land in later tasks. No-op for now.
             _ => {}
         }
+    }
+    Ok(())
+}
+
+fn handle_help_key(app: &mut App, ev: Event) -> io::Result<()> {
+    let Event::Key(key) = ev else {
+        return Ok(());
+    };
+    if key.kind != event::KeyEventKind::Press {
+        return Ok(());
+    }
+    match key.code {
+        event::KeyCode::Char('?')
+        | event::KeyCode::Esc
+        | event::KeyCode::Char('q')
+        | event::KeyCode::Enter => {
+            app.mode = Mode::Normal;
+            app.needs_full_redraw = true;
+        }
+        event::KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -886,7 +915,134 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
     let para = Paragraph::new(rendered);
     frame.render_widget(para, body_area);
 
+    if matches!(app.mode, Mode::Help) {
+        render_help_popup(frame, chunks[0], app.theme);
+    }
+
     render_status_bar(frame, chunks[1], app);
+}
+
+const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Scroll",
+        &[
+            ("j  k  ↓  ↑", "line down / up"),
+            ("d  u", "half page down / up"),
+            ("f  b  space  PgDn  PgUp", "full page down / up"),
+            ("gg  G", "jump to top / bottom"),
+        ],
+    ),
+    (
+        "Headings",
+        &[
+            ("]  [", "next / previous heading"),
+            ("t", "toggle Table of Contents"),
+        ],
+    ),
+    (
+        "Search",
+        &[("/", "search forward"), ("n  N", "next / previous match")],
+    ),
+    (
+        "Links & history",
+        &[
+            ("Enter", "follow visible link"),
+            ("1–9", "pick numbered link in overlay"),
+            ("o  i", "back / forward in history"),
+        ],
+    ),
+    ("Other", &[("?", "toggle this help"), ("q  Ctrl-C", "quit")]),
+];
+
+/// Intrinsic `(width, height)` of the help popup including its border,
+/// derived from `HELP_SECTIONS`. Used by both the renderer and the image
+/// placement filter so they agree on the popup footprint.
+fn help_popup_intrinsic_size() -> (u16, u16) {
+    let key_col: usize = HELP_SECTIONS
+        .iter()
+        .flat_map(|(_, rows)| rows.iter().map(|(k, _)| k.chars().count()))
+        .max()
+        .unwrap_or(0);
+
+    let mut line_count: usize = 0;
+    let mut max_line_w: usize = 0;
+    for (i, (title, rows)) in HELP_SECTIONS.iter().enumerate() {
+        if i > 0 {
+            line_count += 1; // blank separator
+        }
+        line_count += 1; // title row
+        max_line_w = max_line_w.max(title.chars().count());
+        for (k, desc) in *rows {
+            line_count += 1;
+            // Row layout: "  " + key_col + "   " + desc
+            let w = 2 + key_col.max(k.chars().count()) + 3 + desc.chars().count();
+            max_line_w = max_line_w.max(w);
+        }
+    }
+    (max_line_w as u16 + 4, line_count as u16 + 2) // +2/+4 for border+padding
+}
+
+fn help_popup_rect(body: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let (inner_w, inner_h) = help_popup_intrinsic_size();
+    let max_w = (body.width as f32 * 0.9) as u16;
+    let max_h = (body.height as f32 * 0.9) as u16;
+    let w = inner_w.min(max_w.max(20));
+    let h = inner_h.min(max_h.max(6));
+    let x = body.x + (body.width.saturating_sub(w)) / 2;
+    let y = body.y + (body.height.saturating_sub(h)) / 2;
+    ratatui::layout::Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
+}
+
+fn render_help_popup(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, theme: Theme) {
+    use ratatui::style::{Modifier, Style as RStyle};
+    use ratatui::text::{Line as RLine, Span as RSpan};
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+    let accent = match theme {
+        Theme::Dark => ratatui::style::Color::Cyan,
+        Theme::Light => ratatui::style::Color::Blue,
+    };
+    let section = RStyle::default()
+        .fg(accent)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let key = RStyle::default().add_modifier(Modifier::BOLD);
+    let dim = RStyle::default().add_modifier(Modifier::DIM);
+
+    let key_col: usize = HELP_SECTIONS
+        .iter()
+        .flat_map(|(_, rows)| rows.iter().map(|(k, _)| k.chars().count()))
+        .max()
+        .unwrap_or(0);
+
+    let mut lines: Vec<RLine<'static>> = Vec::new();
+    for (i, (title, rows)) in HELP_SECTIONS.iter().enumerate() {
+        if i > 0 {
+            lines.push(RLine::from(""));
+        }
+        lines.push(RLine::from(RSpan::styled(title.to_string(), section)));
+        for (k, desc) in *rows {
+            let pad = " ".repeat(key_col.saturating_sub(k.chars().count()));
+            lines.push(RLine::from(vec![
+                RSpan::raw("  "),
+                RSpan::styled(format!("{k}{pad}"), key),
+                RSpan::raw("   "),
+                RSpan::styled(desc.to_string(), dim),
+            ]));
+        }
+    }
+
+    let popup = help_popup_rect(area);
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Keyboard shortcuts ");
+    let para = Paragraph::new(lines).block(block);
+    frame.render_widget(para, popup);
 }
 
 /// Render the single-row status bar: left region shows the active mode's
@@ -931,6 +1087,7 @@ fn render_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, ap
             }
             label
         }
+        Mode::Help => String::from(" Help — press ? / Esc / q to close "),
         Mode::Normal => String::new(),
     };
     let left_w = left_text.width();
@@ -1101,6 +1258,22 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     } else {
         MARGIN_WIDTH as u16
     };
+    // When the help popup is open, drop placements whose rows intersect the
+    // popup rectangle. Kitty images live on a separate graphics layer, so
+    // without this they would show through the popup; dropping them all
+    // (earlier behavior) also hid headings above/below the popup.
+    let popup_rows: Option<(u16, u16)> = if matches!(app.mode, Mode::Help) {
+        let (full_w, body_h) = app.term_size;
+        let popup = help_popup_rect(ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: full_w,
+            height: body_h,
+        });
+        Some((popup.y, popup.y.saturating_add(popup.height)))
+    } else {
+        None
+    };
     let mut out = HashMap::new();
     // wrap_all emits one VisualLine per screen row (headings expand into
     // N rows: main + spacers), so visual_row just increments by 1 each
@@ -1119,9 +1292,16 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
                 // pixel size, so a heading near the bottom would otherwise
                 // bleed into the status bar. The user can scroll another
                 // row or two to bring the whole heading on-screen.
-                if vr.saturating_add(*rows) <= body_height {
-                    out.insert(*id, (col_offset, vr));
+                if vr.saturating_add(*rows) > body_height {
+                    continue;
                 }
+                if let Some((py0, py1)) = popup_rows {
+                    let img_end = vr.saturating_add(*rows);
+                    if vr < py1 && img_end > py0 {
+                        continue;
+                    }
+                }
+                out.insert(*id, (col_offset, vr));
             }
         }
     }

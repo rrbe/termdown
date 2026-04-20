@@ -22,6 +22,7 @@ pub enum Action {
     OpenLink,
     Back,
     Forward,
+    ToggleHelp,
     None,
 }
 
@@ -55,7 +56,7 @@ pub fn map_normal(key: KeyEvent) -> Action {
         KeyCode::Char('t') => Action::ToggleToc,
 
         KeyCode::Char('/') => Action::SearchBegin { reverse: false },
-        KeyCode::Char('?') => Action::SearchBegin { reverse: true },
+        KeyCode::Char('?') => Action::ToggleHelp,
         KeyCode::Char('n') => Action::SearchNext,
         KeyCode::Char('N') => Action::SearchPrev,
 
@@ -147,16 +148,20 @@ mod tests {
             Action::SearchBegin { reverse: false }
         ));
         assert!(matches!(
-            map_normal(press(KeyCode::Char('?'))),
-            Action::SearchBegin { reverse: true }
-        ));
-        assert!(matches!(
             map_normal(press(KeyCode::Char('n'))),
             Action::SearchNext
         ));
         assert!(matches!(
             map_normal(press(KeyCode::Char('N'))),
             Action::SearchPrev
+        ));
+    }
+
+    #[test]
+    fn question_mark_toggles_help() {
+        assert!(matches!(
+            map_normal(press(KeyCode::Char('?'))),
+            Action::ToggleHelp
         ));
     }
 
