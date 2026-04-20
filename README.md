@@ -76,8 +76,8 @@ Key bindings:
 | `]` / `[` | Next / previous heading |
 | `t` | Toggle Table of Contents panel |
 | `/` | Search forward |
-| `?` | Search backward |
 | `n` / `N` | Next / previous match |
+| `?` | Toggle keyboard-shortcut help overlay |
 | `Enter` | Follow link (overlay picker if multiple visible) |
 | `o` / `i` | Back / forward across followed `.md` links |
 | `q` / `Ctrl-C` | Quit |
