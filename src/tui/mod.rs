@@ -558,6 +558,22 @@ fn looks_like_local_md(target: &str) -> bool {
     lower.ends_with(".md") || lower.ends_with(".markdown")
 }
 
+/// Visual style for a link span. Local `.md` links (followed in-TUI) and
+/// external links (delegated to the OS opener) render differently so the user
+/// can tell them apart before pressing Enter.
+fn link_style_for(url: &str, theme: Theme) -> ratatui::style::Style {
+    use ratatui::style::{Color, Modifier, Style};
+    let fg = match theme {
+        Theme::Dark => Color::Cyan,
+        Theme::Light => Color::Blue,
+    };
+    let mut style = Style::default().fg(fg).add_modifier(Modifier::UNDERLINED);
+    if !looks_like_local_md(url) {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    style
+}
+
 fn spawn_open(url: &str) {
     let cmd = if cfg!(target_os = "macos") {
         "open"
@@ -671,8 +687,9 @@ fn clipped_spans(
     byte_start: usize,
     byte_end: usize,
     matches: &[VisibleMatch],
+    theme: Theme,
 ) -> Vec<RSpan<'static>> {
-    use ratatui::style::{Color as RColor, Style as RStyle};
+    use ratatui::style::{Color as RColor, Modifier, Style as RStyle};
 
     let mut out: Vec<RSpan<'static>> = Vec::new();
     let mut cursor = 0usize;
@@ -684,11 +701,12 @@ fn clipped_spans(
         .fg(RColor::White);
 
     for span in &line.spans {
-        let (content, is_image) = match span {
-            layout::Span::Text { content, .. } | layout::Span::Link { content, .. } => {
-                (content.as_str(), false)
+        let (content, is_image, link_base) = match span {
+            layout::Span::Text { content, .. } => (content.as_str(), false, None),
+            layout::Span::Link { content, url, .. } => {
+                (content.as_str(), false, Some(link_style_for(url, theme)))
             }
-            layout::Span::HeadingImage { .. } => ("", true),
+            layout::Span::HeadingImage { .. } => ("", true, None),
         };
         if is_image {
             continue;
@@ -740,7 +758,20 @@ fn clipped_spans(
                 break; // defensive — shouldn't happen since wrap breaks at char boundaries
             }
             let slice = &content[slice_start..slice_end];
-            match style {
+            let resolved = match style {
+                Some(st) => {
+                    // Search highlight wins on fg/bg, but keep the link
+                    // underline so it stays identifiable under the highlight.
+                    let st = if link_base.is_some() {
+                        st.add_modifier(Modifier::UNDERLINED)
+                    } else {
+                        st
+                    };
+                    Some(st)
+                }
+                None => link_base,
+            };
+            match resolved {
                 Some(st) => out.push(RSpan::styled(slice.to_string(), st)),
                 None => out.push(RSpan::raw(slice.to_string())),
             }
@@ -795,7 +826,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             vl.byte_end,
             current_logical,
         );
-        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches);
+        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches, app.theme);
         let mut full_spans: Vec<RSpan> = Vec::with_capacity(rspans.len() + 1);
         full_spans.push(margin_span.clone());
         full_spans.extend(rspans);
