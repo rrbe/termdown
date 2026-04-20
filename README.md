@@ -21,27 +21,11 @@ H4-H6 headings always fall back to ANSI bold text.
 
 ### Install script
 
-One-liner (downloads the prebuilt binary, verifies its SHA-256, and installs it to `/usr/local/bin`):
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
-The script never invokes `sudo`. If `/usr/local/bin` is not writable, it prints a hint suggesting either `curl ... | sudo bash` or pointing `TERMDOWN_INSTALL_DIR` at a user-owned directory. Prefer to read the script first? `curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | less`.
-
-Environment variables:
-
-- `TERMDOWN_VERSION` -- release tag to install (default: `latest`)
-- `TERMDOWN_INSTALL_DIR` -- install directory (default: `/usr/local/bin`)
-
-Example (pin a version and install into a user directory):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh \
-  | TERMDOWN_VERSION=v0.3.0 TERMDOWN_INSTALL_DIR="$HOME/.local/bin" bash
-```
-
-Supported targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`. Windows users: grab the archive from the [Releases page](https://github.com/rrbe/termdown/releases/latest).
+Defaults to `/usr/local/bin`. Override with `TERMDOWN_VERSION` (release tag) or `TERMDOWN_INSTALL_DIR` (install path).
 
 <details>
 <summary>Manual download (no script)</summary>
@@ -79,13 +63,9 @@ cp target/release/termdown /usr/local/bin/
 
 ## Uninstall
 
-One-liner:
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
 ```
-
-This removes the binary (located via `command -v termdown` or `TERMDOWN_INSTALL_DIR`) and deletes the config directory `~/.termdown`. Set `TERMDOWN_KEEP_CONFIG=1` to keep the config.
 
 <details>
 <summary>Manual uninstall</summary>
