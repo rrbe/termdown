@@ -231,3 +231,30 @@ fn unsupported_terminal_emits_warning_on_stderr() {
     assert!(stderr.contains("termdown: warning: terminal may not support Kitty graphics protocol"));
     assert!(stderr.contains("termdown: headings require Ghostty, Kitty, WezTerm, or iTerm2"));
 }
+
+#[test]
+fn tui_without_file_fails_with_error() {
+    let output = run_termdown(&["--tui"], None, &[("TERM_PROGRAM", "ghostty")], &[]);
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("--tui requires a FILE"),
+        "stderr: {}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
+fn tui_with_stdin_sentinel_fails() {
+    let output = run_termdown(
+        &["--tui", "-"],
+        Some("# hi\n"),
+        &[("TERM_PROGRAM", "ghostty")],
+        &[],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("--tui requires a FILE"),
+        "stderr: {}",
+        stderr_text(&output)
+    );
+}

@@ -1,0 +1,2 @@
+fixtures/expected/*.ansi binary
+fixtures/*.md text eol=lf

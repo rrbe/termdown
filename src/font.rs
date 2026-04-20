@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
@@ -317,42 +318,78 @@ fn resolve_optional_font(
     None
 }
 
+/// Per-level cache of resolved font sets. `Config` is loaded once at startup
+/// and is constant for the process lifetime, so a level → FontSet mapping is
+/// safe to memoize. `SystemSource::new()` and the family-resolution walk are
+/// the dominant cost in heading rasterization (~30–40ms each on macOS), and
+/// without this cache they were re-paid for every H1–H3 in the document.
+static FONT_SETS: [OnceLock<Option<FontSet>>; 6] = [
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+];
+
 /// Resolve a Latin + CJK + optional emoji font set for the given heading level.
-pub fn get_fonts(level: u8, config: &Config) -> Option<FontSet> {
-    let source = SystemSource::new();
-    let props = Properties {
-        style: Style::Normal,
-        weight: weight_for_level(level),
-        stretch: Stretch::NORMAL,
-    };
-    let emoji_props = Properties {
-        style: Style::Normal,
-        weight: Weight::NORMAL,
-        stretch: Stretch::NORMAL,
-    };
+/// Cached per-level for the process lifetime — the first call's `config` wins;
+/// subsequent calls with a different `config` return the originally-resolved
+/// fonts. Safe today because `Config` is loaded once at startup, but callers
+/// shouldn't rely on per-call config.
+pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
+    let idx = level.saturating_sub(1).min(5) as usize;
+    FONT_SETS[idx]
+        .get_or_init(|| resolve_font_set(level, config))
+        .as_ref()
+}
 
-    let latin = resolve_font(
-        &source,
-        &props,
-        config.font.heading.latin.as_deref(),
-        preferred_latin_families(),
-    )?;
+// Shared across heading levels within a thread. `SystemSource::new()` walks
+// the OS font registry (CoreText / fontconfig / DirectWrite), ~20-30ms per
+// call, and we'd otherwise pay it once per heading level. Thread-local
+// instead of `static` because on Linux `SystemSource` wraps a raw
+// `*mut FcConfig` pointer and is neither `Send` nor `Sync`.
+thread_local! {
+    static SYSTEM_SOURCE: OnceCell<SystemSource> = const { OnceCell::new() };
+}
 
-    let cjk = resolve_font(
-        &source,
-        &props,
-        config.font.heading.cjk.as_deref(),
-        preferred_cjk_families(),
-    )?;
+fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
+    SYSTEM_SOURCE.with(|cell| {
+        let source = cell.get_or_init(SystemSource::new);
+        let props = Properties {
+            style: Style::Normal,
+            weight: weight_for_level(level),
+            stretch: Stretch::NORMAL,
+        };
+        let emoji_props = Properties {
+            style: Style::Normal,
+            weight: Weight::NORMAL,
+            stretch: Stretch::NORMAL,
+        };
 
-    let emoji = resolve_optional_font(
-        &source,
-        &emoji_props,
-        config.font.heading.emoji.as_deref(),
-        preferred_emoji_families(),
-    );
+        let latin = resolve_font(
+            source,
+            &props,
+            config.font.heading.latin.as_deref(),
+            preferred_latin_families(),
+        )?;
 
-    Some(FontSet { latin, cjk, emoji })
+        let cjk = resolve_font(
+            source,
+            &props,
+            config.font.heading.cjk.as_deref(),
+            preferred_cjk_families(),
+        )?;
+
+        let emoji = resolve_optional_font(
+            source,
+            &emoji_props,
+            config.font.heading.emoji.as_deref(),
+            preferred_emoji_families(),
+        );
+
+        Some(FontSet { latin, cjk, emoji })
+    })
 }
 
 #[cfg(test)]

@@ -1,0 +1,207 @@
+    [2m────────────────────────────────────────────────────────────[0m
+
+    <IMG>
+
+    <IMG>
+
+    This fixture collects every Markdown feature listed as [1mmissing[0m or [1mpartial[0m in
+    [38;5;213m[48;5;236m docs/MARKDOWN_FEATURE_COVERAGE.md [0m. Use it to verify what termdown renders
+    today and
+    as a regression fixture as features are added.
+
+    The YAML frontmatter above should be hidden by the renderer. Currently it
+    leaks into
+    the rendered output.
+
+    <IMG>
+
+    A raw HTML block:
+
+    [2m<div style="padding: 8px; border: 1px solid #ccc;">[0m
+    [2m  <strong>Hello</strong> from inline HTML.[0m
+    [2m</div>[0m
+
+    Inline HTML in a paragraph: this word is [4munderlined via HTML[24m and this one is
+    red via HTML. An inline 
+     break and an
+    HTML abbreviation.
+
+    An HTML comment:  end of line.
+
+    <IMG>
+
+    Bare URL: https://example.com/docs/readme.html
+    Bare email: support@example.com
+    URL in text: visit https://github.com/rrbe/termdown for the source.
+
+    <IMG>
+
+    [38;5;240m│  [3;38;5;250m[!NOTE][0m
+    [38;5;240m│  [3;38;5;250mUseful information that users should know, even when skimming content.[0m
+
+    [38;5;240m│  [3;38;5;250m[!TIP][0m
+    [38;5;240m│  [3;38;5;250mHelpful advice for doing things better or more easily.[0m
+
+    [38;5;240m│  [3;38;5;250m[!IMPORTANT][0m
+    [38;5;240m│  [3;38;5;250mKey information users need to know to achieve their goal.[0m
+
+    [38;5;240m│  [3;38;5;250m[!WARNING][0m
+    [38;5;240m│  [3;38;5;250mUrgent info that needs immediate user attention to avoid problems.[0m
+
+    [38;5;240m│  [3;38;5;250m[!CAUTION][0m
+    [38;5;240m│  [3;38;5;250mAdvises about risks or negative outcomes of certain actions.[0m
+
+    <IMG>
+
+    Here is a sentence with a footnote.[^1] And another one.[^longnote]
+
+    Inline footnote: text with an inline footnote.^[This is an inline footnote
+    body.]
+
+    [^1]: This is the first footnote body.
+    [^longnote]: This footnote has [1mbold[0m, [38;5;213m[48;5;236m code [0m, and multiple
+
+    [48;5;236m[38;5;213m paragraphs. It should render as a numbered reference in the main text, [0m
+    [48;5;236m[38;5;213m with the body collected at the bottom of the document.                 [0m
+
+    <IMG>
+
+    Inline math: the Pythagorean theorem says $a^2 + b^2 = c^2$.
+
+    Display math:
+
+    $$
+    \int_{-\infty}^{\infty} e^{-x^2} , dx = \sqrt{\pi}
+    $$
+
+    A matrix:
+
+    $$
+    A = \begin{pmatrix} 1 & 2 \ 3 & 4 \end{pmatrix}
+    $$
+
+    <IMG>
+
+    Term 1
+    : Definition of term 1.
+
+    Term 2
+    : First paragraph of the definition.
+
+    [48;5;236m[38;5;213m Second paragraph of the definition, indented. [0m
+
+    Apple
+    : A red or green fruit.
+
+    Orange
+    : A citrus fruit with a tough rind.
+
+    <IMG>
+
+    Straight quotes that should become curly: "Hello," she said. 'Yes,' he
+    replied.
+    Ellipsis from three dots... and an em-dash -- like this, and an en-dash --
+    too.
+
+    <IMG>
+
+    Reference a page with [[WikiLink]] syntax, and with an alias like
+    [[Target Page|the display text]].
+
+    <IMG>
+
+    Water is H~2~O and Einstein said E=mc^2^. Also 10^th^ and x~n+1~.
+
+    <IMG>
+
+    A flowchart:
+
+    [48;5;236m[38;5;213m flowchart LR                 [0m
+    [48;5;236m[38;5;213m     A[Start] --> B{Decision} [0m
+    [48;5;236m[38;5;213m     B -->|Yes| C[Do thing]   [0m
+    [48;5;236m[38;5;213m     B -->|No| D[Skip]        [0m
+    [48;5;236m[38;5;213m     C --> E[End]             [0m
+    [48;5;236m[38;5;213m     D --> E                  [0m
+
+    A sequence diagram:
+
+    [48;5;236m[38;5;213m sequenceDiagram                [0m
+    [48;5;236m[38;5;213m     Alice->>Bob: Hello Bob     [0m
+    [48;5;236m[38;5;213m     Bob-->>Alice: Hi Alice     [0m
+    [48;5;236m[38;5;213m     Alice-)Bob: See you later! [0m
+
+    A class diagram:
+
+    [48;5;236m[38;5;213m classDiagram              [0m
+    [48;5;236m[38;5;213m     class Animal {        [0m
+    [48;5;236m[38;5;213m         +String name      [0m
+    [48;5;236m[38;5;213m         +int age          [0m
+    [48;5;236m[38;5;213m         +makeSound() void [0m
+    [48;5;236m[38;5;213m     }                     [0m
+    [48;5;236m[38;5;213m     Animal <|-- Dog       [0m
+    [48;5;236m[38;5;213m     Animal <|-- Cat       [0m
+
+    <IMG>
+
+    [48;5;236m[38;5;213m @startuml                              [0m
+    [48;5;236m[38;5;213m Alice -> Bob: Authentication Request   [0m
+    [48;5;236m[38;5;213m Bob --> Alice: Authentication Response [0m
+    [48;5;236m[38;5;213m @enduml                                [0m
+
+    [48;5;236m[38;5;213m digraph G {      [0m
+    [48;5;236m[38;5;213m     rankdir=LR;  [0m
+    [48;5;236m[38;5;213m     A -> B -> C; [0m
+    [48;5;236m[38;5;213m     A -> C;      [0m
+    [48;5;236m[38;5;213m }                [0m
+
+    <IMG>
+
+    [48;5;236m[38;5;213m fn main() {                            [0m
+    [48;5;236m[38;5;213m     let greeting = "Hello, termdown!"; [0m
+    [48;5;236m[38;5;213m     println!("{}", greeting);          [0m
+    [48;5;236m[38;5;213m }                                      [0m
+
+    [48;5;236m[38;5;213m def fib(n: int) -> int: [0m
+    [48;5;236m[38;5;213m     a, b = 0, 1         [0m
+    [48;5;236m[38;5;213m     for _ in range(n):  [0m
+    [48;5;236m[38;5;213m         a, b = b, a + b [0m
+    [48;5;236m[38;5;213m     return a            [0m
+
+    [48;5;236m[38;5;213m {                                                  [0m
+    [48;5;236m[38;5;213m   "name": "termdown",                              [0m
+    [48;5;236m[38;5;213m   "features": ["headings", "tables", "tasklists"], [0m
+    [48;5;236m[38;5;213m   "version": "0.2.0"                               [0m
+    [48;5;236m[38;5;213m }                                                  [0m
+
+    <IMG>
+
+    Local image (does not exist, exercises error path):
+
+    [2m[🖼 local image alt](./fixtures/nonexistent.png)[0m
+
+    Remote image:
+
+    [2m[🖼 remote image](https://example.com/banner.png)[0m
+
+    Reference-style image:
+
+    [2m[🖼 ref image](https://example.com/banner.png)[0m
+
+    <IMG>
+
+    Shortcodes like :smile:, :rocket:, :tada: should ideally become 😄 🚀 🎉.
+    Unicode emoji themselves work fine: 😄 🚀 🎉.
+
+    <IMG>
+
+      [1mLeft[0m             [2m  │  [0m[1mCenter[0m      [2m  │  [0m[1mRight[0m 
+      [2m─────────────────[0m[2m  ┼  [0m[2m────────────[0m[2m  ┼  [0m[2m──────[0m
+      a                [2m  │  [0mb           [2m  │  [0mc     
+      long left content[2m  │  [0mcenter      [2m  │  [0m1     
+      x                [2m  │  [0m[1mbold[0m in cell[2m  │  [0m[38;5;213m[48;5;236m code [0m
+
+    <IMG>
+
+    If every section above renders with rich formatting, termdown has full
+    coverage of the
+    audited feature set.

@@ -270,7 +270,16 @@ fn draw_raster_glyph(
 
 /// Render heading text to a PNG image. Returns `None` if font loading or
 /// PNG encoding fails (caller should fall back to ANSI text).
-pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> Option<Vec<u8>> {
+///
+/// Returns the PNG bytes and the image's pixel dimensions `(width, height)`.
+/// The TUI needs the pixel height to compute how many terminal rows the image
+/// occupies (`ceil(height / cell_pixel_height)`); cat mode ignores it.
+pub fn render_heading(
+    text: &str,
+    level: u8,
+    config: &Config,
+    theme: Theme,
+) -> Option<(Vec<u8>, u32, u32)> {
     let st = style::heading_style(level, theme);
     let fonts = font::get_fonts(level, config)?;
     let scale = PxScale {
@@ -278,7 +287,7 @@ pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> O
         y: st.size,
     };
 
-    let metrics = measure_text(&fonts, scale, text, st.tracking);
+    let metrics = measure_text(fonts, scale, text, st.tracking);
 
     let img_w = (metrics.width as u32 + st.pad_x * 2).max(1);
     let img_h = (metrics.height as u32 + st.pad_top + st.pad_bottom).max(1);
@@ -294,7 +303,7 @@ pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> O
     let baseline_y = st.pad_top as f32 + metrics.ascent;
     draw_text(
         &mut img,
-        &fonts,
+        fonts,
         scale,
         (st.pad_x as f32, baseline_y),
         text,
@@ -306,20 +315,29 @@ pub fn render_heading(text: &str, level: u8, config: &Config, theme: Theme) -> O
     PngEncoder::new(&mut buf)
         .write_image(img.as_raw(), img_w, img_h, image::ExtendedColorType::Rgba8)
         .ok()?;
-    Some(buf)
+    Some((buf, img_w, img_h))
 }
 
 // ─── Kitty Graphics Protocol ────────────────────────────────────────────────
 
-/// Drain any Kitty graphics protocol responses from stdin.
-/// Terminals like iTerm2 send back `OK` acknowledgments that leak as visible text.
+/// Discard any pending bytes on stdin without blocking. Cheap; safe to call
+/// unconditionally at end of cat-mode.
 #[cfg(unix)]
-pub fn drain_kitty_responses() {
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    // SAFETY: tcflush is a standard POSIX call on valid fd.
+pub fn flush_stdin() {
+    // SAFETY: tcflush is a standard POSIX call on a process-owned fd.
     unsafe {
         libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
     }
+}
+
+/// iTerm2 ignores the Kitty `q=2` response-suppression flag and emits `OK`
+/// ACKs anyway. Wait briefly so those bytes reach the input buffer, then
+/// discard them. Only call under iTerm2 — the 50ms sleep is wasted overhead
+/// on terminals (Ghostty/Kitty/WezTerm) that respect `q=2`.
+#[cfg(unix)]
+pub fn drain_iterm2_acks() {
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    flush_stdin();
 }
 
 /// Encode PNG data as a Kitty graphics protocol escape sequence.
@@ -345,4 +363,154 @@ pub fn kitty_display(png: &[u8]) -> String {
     }
 
     out
+}
+
+// ─── Kitty Image Lifecycle Primitives ───────────────────────────────────────
+//
+// Unlike `kitty_display` which always transmits + displays in one go, these
+// split the transmit + place + delete operations so the TUI can cache images
+// on the terminal and re-position them cheaply on scroll.
+
+use std::io::Write;
+
+/// Transmit PNG data to the terminal and cache it under `id`. The image is
+/// not displayed yet; call `place` afterwards.
+pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()> {
+    use base64::engine::general_purpose::STANDARD;
+    let b64 = STANDARD.encode(png);
+    let total = b64.len();
+    let mut offset = 0;
+    let mut first = true;
+    while offset < total {
+        let end = (offset + 4096).min(total);
+        let chunk = &b64[offset..end];
+        let m = if end == total { "0" } else { "1" };
+        if first {
+            write!(w, "\x1b_Gf=100,a=t,i={id},q=2,m={m};{chunk}\x1b\\")?;
+            first = false;
+        } else {
+            write!(w, "\x1b_Gm={m};{chunk}\x1b\\")?;
+        }
+        offset = end;
+    }
+    // Empty-payload edge case: still send a minimal terminating frame so the
+    // terminal knows the transmission ended. For zero-length png this is only
+    // reachable from test code; a real heading image is never empty.
+    if total == 0 {
+        write!(w, "\x1b_Gf=100,a=t,i={id},q=2,m=0;\x1b\\")?;
+    }
+    Ok(())
+}
+
+/// Place previously-transmitted image `id` at the given cell coordinates.
+/// Moves the cursor explicitly because Kitty's `a=p` places at the current
+/// cursor position; the `x` and `y` APC keys are source-image pixel offsets
+/// (for cropping), not terminal cell coordinates.
+///
+/// The `C=1` flag tells Kitty to NOT advance the cursor after placement.
+/// Without it, placing a tall image near the bottom of the screen would
+/// push the cursor past the last row, causing the terminal to scroll the
+/// entire visible region upward — this snowballs across frames and
+/// produces the "status bar creeps upward on each scroll" failure.
+pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
+    // CUP (cursor position) is 1-indexed: row+1, col+1.
+    write!(
+        w,
+        "\x1b[{};{}H\x1b_Ga=p,i={id},C=1,q=2;\x1b\\",
+        row + 1,
+        col + 1
+    )
+}
+
+/// Delete a single placement of `id`. Keeps the cached image data so future
+/// `place` calls on the same id are cheap.
+pub fn delete_placement<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")
+}
+
+/// Delete all placements and image data this client has created. Used at
+/// TUI exit to clean up the terminal.
+pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=d,d=A,q=2;\x1b\\")
+}
+
+// ─── Shared Image Record ────────────────────────────────────────────────────
+
+/// PNG data + cell dimensions for a rendered heading image.
+/// Stored by id in `RenderedDoc` and transmitted to the terminal
+/// once per TUI session (or emitted directly in cat mode).
+///
+/// `rows` is the number of terminal cell rows the image occupies. This is
+/// a conservative estimate at layout time (based on heading level) and is
+/// refined by `tui::mod::refine_image_rows` once the real terminal cell
+/// pixel height is known. `px_height` preserves the exact PNG height so
+/// the refinement step can compute `ceil(px_height / cell_pixel_height)`.
+// TODO: remove #[allow(dead_code)] once Task 1.5 wires up image production
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingImage {
+    pub id: u32,
+    pub png: Vec<u8>,
+    pub cols: u16,
+    pub rows: u16,
+    pub px_width: u32,
+    pub px_height: u32,
+}
+
+#[cfg(test)]
+mod kitty_tests {
+    use super::*;
+
+    #[test]
+    fn transmit_produces_a_eq_t_with_id() {
+        let mut buf = Vec::new();
+        transmit(&mut buf, 42, b"\x89PNG\r\n").unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        // Lowercase 'a=t' — transmit without displaying.
+        assert!(s.starts_with("\x1b_Gf=100,a=t,i=42,q=2"));
+        assert!(s.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn transmit_chunks_large_payload() {
+        // 8 KB PNG-ish payload; base64 is ~10.6 KB → 3 chunks of 4 KB.
+        let mut buf = Vec::new();
+        let payload = vec![0u8; 8_000];
+        transmit(&mut buf, 7, &payload).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        // Every chunk is an APC-wrapped escape: count \x1b_G occurrences.
+        let chunk_count = s.matches("\x1b_G").count();
+        assert!(
+            chunk_count >= 2,
+            "expected chunked transmission, got {chunk_count} escape(s)"
+        );
+        // Middle chunks use m=1, final uses m=0.
+        assert!(s.contains(";") && s.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn place_produces_cursor_move_then_a_eq_p() {
+        let mut buf = Vec::new();
+        place(&mut buf, 7, 3, 5).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        // Cursor move is 1-indexed (row+1, col+1), then place by id with
+        // C=1 so kitty doesn't advance the cursor after placement.
+        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,C=1,q=2;\x1b\\");
+    }
+
+    #[test]
+    fn delete_placement_sends_d_i() {
+        let mut buf = Vec::new();
+        delete_placement(&mut buf, 9).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "\x1b_Ga=d,d=i,i=9,q=2;\x1b\\");
+    }
+
+    #[test]
+    fn delete_all_for_client_sends_d_cap_a() {
+        let mut buf = Vec::new();
+        delete_all_for_client(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "\x1b_Ga=d,d=A,q=2;\x1b\\");
+    }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct Config {
     #[serde(default)]
     pub font: FontSection,
@@ -11,13 +11,13 @@ pub struct Config {
     pub theme: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct FontSection {
     #[serde(default)]
     pub heading: HeadingFontConfig,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct HeadingFontConfig {
     /// Font for Latin / ASCII text (sans-serif recommended, e.g. "Inter").
     pub latin: Option<String>,

@@ -1,0 +1,71 @@
+    <IMG>
+
+    <IMG>
+
+    <IMG>
+
+    <IMG>
+
+    [1mThis is a Heading h6[0m
+
+    <IMG>
+
+    [3mThis text will be italic[23m
+    [3mThis will also be italic[23m
+
+    [1mThis text will be bold[0m
+    [1mThis will also be bold[0m
+
+    [3mYou [23m[1m[3mcan[0m[3m combine them[23m
+
+    <IMG>
+
+    <IMG>
+
+      • Item 1
+      • Item 2
+      • Item 2a
+      • Item 2b
+        • Item 3a
+        • Item 3b
+
+    <IMG>
+
+      1. Item 1
+      2. Item 2
+      3. Item 3
+        1. Item 3a
+        2. Item 3b
+
+    <IMG>
+
+    [2m[🖼 This is an alt text.](/image/Markdown-mark.svg)[0m
+
+    <IMG>
+
+    You may be using [36m[4mMarkdown Live Preview[24m[0m [38;5;245m(https://markdownlivepreview.com/)[0m.
+
+    <IMG>
+
+    [38;5;240m│  [3;38;5;250mMarkdown is a lightweight markup language with plain-text-formatting[0m
+    [38;5;240m│  [3;38;5;250msyntax, created in 2004 by John Gruber with Aaron Swartz.[0m
+    [38;5;240m│  [38;5;240m│  [3;38;5;250mMarkdown is often used to format readme files, for writing messages[0m
+    [38;5;240m│  [38;5;240m│  [3;38;5;250min online discussion forums, and to create rich text using a plain[0m
+    [38;5;240m│  [38;5;240m│  [3;38;5;250mtext editor.[0m
+
+    <IMG>
+
+      [1mLeft columns[0m[2m  │  [0m[1mRight columns[0m
+      [2m────────────[0m[2m  ┼  [0m[2m─────────────[0m
+      left foo    [2m  │  [0mright foo    
+      left bar    [2m  │  [0mright bar    
+      left baz    [2m  │  [0mright baz    
+
+    <IMG>
+
+    [48;5;236m[38;5;213m let message = 'Hello world'; [0m
+    [48;5;236m[38;5;213m alert(message);              [0m
+
+    <IMG>
+
+    This web site is using [38;5;213m[48;5;236m markedjs/marked [0m.

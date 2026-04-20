@@ -1,9 +1,11 @@
+mod cat;
 mod config;
 mod font;
-mod markdown;
+mod layout;
 mod render;
 mod style;
 mod theme;
+mod tui;
 
 use std::fs;
 use std::io::{self, Read};
@@ -27,6 +29,7 @@ fn main() {
         println!("  -h, --help                Show this help message");
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
+        println!("  --tui                     Open FILE in interactive TUI mode");
         println!();
         println!("Config: ~/.termdown/config.toml");
         return;
@@ -36,6 +39,8 @@ fn main() {
         println!("termdown {VERSION}");
         return;
     }
+
+    let tui_mode = args.iter().any(|a| a == "--tui");
 
     check_terminal_support();
 
@@ -67,6 +72,18 @@ fn main() {
         found
     };
 
+    if tui_mode {
+        let path = match file_arg.as_deref() {
+            Some("-") | None => {
+                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
+                std::process::exit(2);
+            }
+            Some(p) => p.to_string(),
+        };
+        tui::run(&path, &config, theme);
+        return;
+    }
+
     let md = match file_arg.as_deref() {
         None | Some("-") => {
             let mut buf = String::new();
@@ -88,18 +105,25 @@ fn main() {
 
     let colors = crate::style::Colors::for_theme(theme);
 
-    // Disable terminal echo so Kitty graphics protocol responses
-    // (e.g. iTerm2's OK acknowledgments) don't appear on screen.
+    // iTerm2 ignores the Kitty `q=2` response-suppression flag and sends OK
+    // ACKs anyway; disable ECHO there so they don't leak to the screen. Other
+    // terminals (Ghostty, Kitty, WezTerm) respect `q=2` — leave ECHO alone so
+    // we don't trip Ghostty's Secure Keyboard Entry auto-enable heuristic,
+    // which treats `~ECHO` as a password prompt.
     #[cfg(unix)]
-    let saved_termios = disable_echo();
+    let saved_termios = needs_echo_suppression().then(disable_echo);
 
-    markdown::render(&md, term_width, &config, theme, &colors);
+    let doc = layout::build(&md, &config, theme);
+    cat::print(&doc, term_width, &colors);
 
-    // Drain any pending responses, then restore terminal state.
     #[cfg(unix)]
     {
-        render::drain_kitty_responses();
-        restore_termios(&saved_termios);
+        if let Some(saved) = saved_termios {
+            render::drain_iterm2_acks();
+            restore_termios(&saved);
+        } else {
+            render::flush_stdin();
+        }
     }
 }
 
@@ -124,6 +148,13 @@ fn check_terminal_support() {
 }
 
 // ─── UNIX Terminal State ────────────────────────────────────────────────────
+
+#[cfg(unix)]
+fn needs_echo_suppression() -> bool {
+    std::env::var("TERM_PROGRAM")
+        .map(|v| v.eq_ignore_ascii_case("iTerm.app"))
+        .unwrap_or(false)
+}
 
 #[cfg(unix)]
 fn disable_echo() -> libc::termios {

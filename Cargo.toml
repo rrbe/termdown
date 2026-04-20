@@ -1,6 +1,6 @@
 [package]
 name = "termdown"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Render Markdown with large-font headings in the terminal via Kitty graphics protocol"
 license = "Apache-2.0"
@@ -12,12 +12,17 @@ categories = ["command-line-utilities", "text-processing"]
 [dependencies]
 ab_glyph = "0.2"
 base64 = "0.22"
+crossterm = "0.28"
 font-kit = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pulldown-cmark = "0.13"
+ratatui = "0.29"
+rayon = "1"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 terminal_size = "0.4"
 toml = "0.8"
+tui-textarea = "0.7"
 unicode-width = "0.2"
 
 [target.'cfg(unix)'.dependencies]
