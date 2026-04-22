@@ -8,6 +8,19 @@ readme = "README.md"
 authors = ["shawn <shineoutgx@gmail.com>"]
 keywords = ["markdown", "terminal", "kitty", "cli", "renderer"]
 categories = ["command-line-utilities", "text-processing"]
+repository = "https://github.com/rrbe/termdown"
+homepage = "https://github.com/rrbe/termdown"
+exclude = [
+    "CLAUDE.md",
+    "TODO.md",
+    "TEST_PLAN.md",
+    "docs/",
+    ".github/",
+    "install.sh",
+    "uninstall.sh",
+    "Cross.toml",
+    "README_CN.md",
+]
 
 [dependencies]
 ab_glyph = "0.2"
