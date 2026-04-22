@@ -32,7 +32,7 @@ H4-H6 headings always fall back to ANSI bold text.
 cargo install termdown
 ```
 
-Installs into `~/.cargo/bin/`. Requires Rust 1.74+.
+Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 
 ### Prebuilt binary (no Rust toolchain needed)
 
