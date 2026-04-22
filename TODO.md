@@ -1,3 +1,7 @@
 - [ ] 测试 html 标签支持
 - [ ] 图片支持
 - [ ] 长文本换行时缩进的处理
+- [ ] 找出真实 MSRV 并下调 `rust-version`(当前 `1.95` 是跟本地对齐,触达面窄)
+  - 本地跑 `cargo install cargo-msrv && cargo msrv find`,二分出最低能编译的版本
+  - 同步更新 `Cargo.toml` 的 `rust-version` 和 `README.md` 里的 "Requires Rust X.Y+"
+  - 在 `.github/workflows/ci.yml` 加一个 `msrv` job(`cargo check --all-targets` on pinned toolchain),防止以后 PR 悄悄抬高 MSRV
