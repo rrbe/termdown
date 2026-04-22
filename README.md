@@ -26,7 +26,15 @@ H4-H6 headings always fall back to ANSI bold text.
 
 ## Installation
 
-### Install script
+### From crates.io (recommended, requires Rust)
+
+```sh
+cargo install termdown
+```
+
+Installs into `~/.cargo/bin/`. Requires Rust 1.74+.
+
+### Prebuilt binary (no Rust toolchain needed)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
@@ -51,13 +59,11 @@ sudo mv termdown /usr/local/bin/
 
 </details>
 
-### Install from source
+### From git (latest development snapshot)
 
 ```sh
 cargo install --git https://github.com/rrbe/termdown
 ```
-
-Installs into `~/.cargo/bin/`.
 
 ## Uninstall
 

@@ -10,6 +10,7 @@ keywords = ["markdown", "terminal", "kitty", "cli", "renderer"]
 categories = ["command-line-utilities", "text-processing"]
 repository = "https://github.com/rrbe/termdown"
 homepage = "https://github.com/rrbe/termdown"
+rust-version = "1.74"
 exclude = [
     "CLAUDE.md",
     "TODO.md",
@@ -19,7 +20,6 @@ exclude = [
     "install.sh",
     "uninstall.sh",
     "Cross.toml",
-    "README_CN.md",
 ]
 
 [dependencies]
