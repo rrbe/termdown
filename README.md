@@ -6,8 +6,8 @@ Render Markdown with large-font headings in the terminal using the Kitty graphic
 
 <table>
 <tr>
-<td><img src="docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
-<td><img src="docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
 </tr>
 </table>
 
@@ -26,7 +26,15 @@ H4-H6 headings always fall back to ANSI bold text.
 
 ## Installation
 
-### Install script
+### From crates.io (recommended, requires Rust)
+
+```sh
+cargo install termdown
+```
+
+Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
+
+### Prebuilt binary (no Rust toolchain needed)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
@@ -51,13 +59,11 @@ sudo mv termdown /usr/local/bin/
 
 </details>
 
-### Install from source
+### From git (latest development snapshot)
 
 ```sh
 cargo install --git https://github.com/rrbe/termdown
 ```
-
-Installs into `~/.cargo/bin/`.
 
 ## Uninstall
 
