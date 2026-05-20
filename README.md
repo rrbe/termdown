@@ -7,7 +7,7 @@ Render Markdown with large-font headings in the terminal using the Kitty graphic
 <table>
 <tr>
 <td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown rendering the English README in TUI mode" /></td>
 </tr>
 </table>
 
@@ -19,8 +19,8 @@ glow is a great terminal Markdown renderer, but headings are only distinguished 
 
 termdown rasterizes H1-H3 headings as PNG and paints them via the Kitty graphics protocol. Two modes share the same renderer:
 
-- **Direct output** -- `cat`-like, pipe-friendly; dump rendered Markdown straight into your terminal.
-- **Interactive TUI** (`--tui`) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
+- **Interactive TUI** (default when a file is given) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
+- **Direct output** (`--cat`, or automatic when stdout is piped / input comes from stdin) -- dump rendered Markdown straight into your terminal.
 
 H4-H6 headings always fall back to ANSI bold text.
 
@@ -84,11 +84,17 @@ rm -rf ~/.termdown
 ## Usage
 
 ```sh
-# Render a file
+# Open a file in the interactive TUI (default)
 termdown README.md
 
-# Pipe from stdin
+# Force plain cat-style output (non-interactive, pipe-friendly)
+termdown --cat README.md
+
+# Pipe from stdin (always cat-style — TUI needs a real file)
 cat notes.md | termdown
+
+# Piped or redirected stdout also falls back to cat
+termdown README.md | less
 
 # Use a specific theme instead of auto-detect
 termdown --theme light README.md
@@ -100,10 +106,11 @@ termdown --version
 
 ### TUI mode
 
-For long files, use `--tui` for a vim-style interactive browser:
+The TUI launches automatically whenever you pass a file and stdout is a real
+terminal:
 
 ```sh
-termdown --tui README.md
+termdown README.md
 ```
 
 Key bindings:

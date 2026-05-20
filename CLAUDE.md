@@ -38,3 +38,17 @@ Add it as a Makefile target first, then reference the target from CI. Never let 
 3. Never run `git commit` while `HEAD` is on `master`, and never run `git push origin master` — even for "small" doc tweaks. Committing to local master (even without pushing) tends to contaminate the merge base of later feature branches.
 
 If you notice you're on `master` with uncommitted changes, stash them, switch to a new branch, and pop the stash before committing.
+
+### Exception: version bumps
+
+Version bumps are the **only** allowed direct-to-`master` commits. They must not ride along inside a feature/fix PR — keep them as standalone commits so the release history stays readable.
+
+When the feature/fix PRs that make up a release have all merged into `master`:
+
+1. `git checkout master && git pull` to land on the merged tip.
+2. Edit `Cargo.toml` (and `Cargo.lock` — `cargo build` will refresh it) to the new version.
+3. Lock the `CHANGELOG.md` `[Unreleased]` section to `[X.Y.Z] - YYYY-MM-DD`.
+4. `git commit -m "chore: bump version to X.Y.Z"` on `master`.
+5. `git tag vX.Y.Z` and `git push origin master --follow-tags`.
+
+The `release.yml` workflow triggers on `v*` tag pushes and produces the GitHub Release (cross-platform binaries + checksums). Pushing the tag is therefore both the version stamp **and** the release trigger — no extra step.

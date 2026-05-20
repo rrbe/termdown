@@ -10,6 +10,7 @@ mod tui;
 use std::fs;
 use std::io::{self, Read};
 
+use crossterm::tty::IsTty;
 use terminal_size::{terminal_size, Width};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -29,7 +30,10 @@ fn main() {
         println!("  -h, --help                Show this help message");
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
-        println!("  --tui                     Open FILE in interactive TUI mode");
+        println!("  --cat                     Force non-interactive cat-style output");
+        println!();
+        println!("By default, passing FILE opens it in the interactive TUI.");
+        println!("Piped/redirected stdout and stdin input automatically use cat mode.");
         println!();
         println!("Config: ~/.termdown/config.toml");
         return;
@@ -40,7 +44,7 @@ fn main() {
         return;
     }
 
-    let tui_mode = args.iter().any(|a| a == "--tui");
+    let cat_flag = args.iter().any(|a| a == "--cat");
 
     check_terminal_support();
 
@@ -72,14 +76,14 @@ fn main() {
         found
     };
 
-    if tui_mode {
-        let path = match file_arg.as_deref() {
-            Some("-") | None => {
-                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
-                std::process::exit(2);
-            }
-            Some(p) => p.to_string(),
-        };
+    // TUI is the default when we have a real file path and stdout is a
+    // terminal; --cat, piping/redirecting, or stdin input all fall through
+    // to cat mode so scripts like `termdown foo.md | less` keep working.
+    let want_tui =
+        !cat_flag && matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty();
+
+    if want_tui {
+        let path = file_arg.expect("want_tui implies a file path");
         tui::run(&path, &config, theme);
         return;
     }

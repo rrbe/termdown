@@ -233,28 +233,36 @@ fn unsupported_terminal_emits_warning_on_stderr() {
 }
 
 #[test]
-fn tui_without_file_fails_with_error() {
-    let output = run_termdown(&["--tui"], None, &[("TERM_PROGRAM", "ghostty")], &[]);
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("--tui requires a FILE"),
-        "stderr: {}",
-        stderr_text(&output)
-    );
-}
-
-#[test]
-fn tui_with_stdin_sentinel_fails() {
+fn file_arg_with_piped_stdout_falls_back_to_cat() {
+    // Default is TUI when a FILE is given, but only if stdout is a TTY.
+    // Tests pipe stdout, so we should get plain cat output, not a TUI error.
+    let file = TempMarkdownFile::new("hello from file\n");
     let output = run_termdown(
-        &["--tui", "-"],
-        Some("# hi\n"),
+        &[file.path().to_str().expect("path should be valid UTF-8")],
+        None,
         &[("TERM_PROGRAM", "ghostty")],
         &[],
     );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("--tui requires a FILE"),
-        "stderr: {}",
-        stderr_text(&output)
+    let stdout = strip_ansi(&stdout_text(&output));
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+    assert!(stdout.contains("hello from file"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn cat_flag_forces_cat_output_with_file() {
+    let file = TempMarkdownFile::new("plain content\n");
+    let output = run_termdown(
+        &[
+            "--cat",
+            file.path().to_str().expect("path should be valid UTF-8"),
+        ],
+        None,
+        &[("TERM_PROGRAM", "ghostty")],
+        &[],
     );
+    let stdout = strip_ansi(&stdout_text(&output));
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+    assert!(stdout.contains("plain content"), "stdout was: {stdout:?}");
 }
