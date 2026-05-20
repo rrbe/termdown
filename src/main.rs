@@ -10,6 +10,7 @@ mod tui;
 use std::fs;
 use std::io::{self, Read};
 
+use crossterm::tty::IsTty;
 use terminal_size::{terminal_size, Width};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -29,7 +30,9 @@ fn main() {
         println!("  -h, --help                Show this help message");
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
-        println!("  --tui                     Open FILE in interactive TUI mode");
+        println!("  --cat                     Force non-interactive cat-style output");
+        println!("  --tui                     Force interactive TUI mode (default when");
+        println!("                            FILE is given and stdout is a terminal)");
         println!();
         println!("Config: ~/.termdown/config.toml");
         return;
@@ -40,7 +43,13 @@ fn main() {
         return;
     }
 
-    let tui_mode = args.iter().any(|a| a == "--tui");
+    let tui_flag = args.iter().any(|a| a == "--tui");
+    let cat_flag = args.iter().any(|a| a == "--cat");
+
+    if tui_flag && cat_flag {
+        eprintln!("termdown: --tui and --cat are mutually exclusive");
+        std::process::exit(2);
+    }
 
     check_terminal_support();
 
@@ -72,10 +81,22 @@ fn main() {
         found
     };
 
-    if tui_mode {
+    // Decide between TUI and cat. TUI is the default when we have a real file
+    // path and stdout is a terminal; piping/redirecting falls back to cat so
+    // scripts like `termdown foo.md | less` keep working.
+    let want_tui = if cat_flag {
+        false
+    } else if tui_flag {
+        true
+    } else {
+        matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty()
+    };
+
+    if want_tui {
         let path = match file_arg.as_deref() {
             Some("-") | None => {
-                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
+                let flag = if tui_flag { "--tui" } else { "TUI mode" };
+                eprintln!("termdown: {flag} requires a FILE argument (stdin is not supported)");
                 std::process::exit(2);
             }
             Some(p) => p.to_string(),

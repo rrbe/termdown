@@ -18,8 +18,8 @@
 
 termdown 将 H1-H3 标题栅格化为 PNG 图片，通过 Kitty 图形协议直接绘制到终端。提供两种使用模式：
 
-- **直接输出** —— `termdown README.md`, 像 `cat` 一样轻量、管道友好，把渲染后的 Markdown 直接打到终端。适合快速查看短文档。
-- **交互式 TUI** —— `termdown --tui README.md`，类 vim/less 的体验，支持常见的翻页、搜索等快捷键，支持查看 TOC、链接跳转，适合阅读较长文档。
+- **交互式 TUI**（默认）—— `termdown README.md`，类 vim/less 的体验，支持常见的翻页、搜索等快捷键，支持查看 TOC、链接跳转，适合阅读较长文档。
+- **直接输出**（`--cat`，或当 stdout 被管道/重定向、输入来自 stdin 时自动启用）—— 像 `cat` 一样轻量、管道友好，把渲染后的 Markdown 直接打到终端。
 
 H4-H6 标题始终以 ANSI 粗体文本渲染。不想让文档加入那么多种字重，那样反而损害可读性。
 
@@ -77,11 +77,17 @@ rm -rf ~/.termdown
 ## 使用
 
 ```sh
-# 渲染文件
+# 默认进入交互式 TUI
 termdown README.md
 
-# 从 stdin 管道输入
+# 强制使用 cat 风格的纯输出（非交互、管道友好）
+termdown --cat README.md
+
+# 从 stdin 管道输入（始终是 cat 模式 —— TUI 需要真实文件）
 cat notes.md | termdown
+
+# stdout 被管道/重定向时也会自动回退到 cat
+termdown README.md | less
 
 # 指定主题（不使用终端亮色、暗色主题自动检测）
 termdown --theme light README.md
@@ -93,7 +99,7 @@ termdown --version
 
 ### TUI 模式
 
-阅读较长的文档时，可以用 `--tui` 进入类似 vim 的交互浏览器：
+当传入文件且 stdout 为真实终端时，默认进入 TUI。也可以显式用 `--tui` 强制开启：
 
 ```sh
 termdown --tui README.md

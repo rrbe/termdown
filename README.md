@@ -19,8 +19,8 @@ glow is a great terminal Markdown renderer, but headings are only distinguished 
 
 termdown rasterizes H1-H3 headings as PNG and paints them via the Kitty graphics protocol. Two modes share the same renderer:
 
-- **Direct output** -- `cat`-like, pipe-friendly; dump rendered Markdown straight into your terminal.
-- **Interactive TUI** (`--tui`) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
+- **Interactive TUI** (default when a file is given) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
+- **Direct output** (`--cat`, or automatic when stdout is piped / input comes from stdin) -- dump rendered Markdown straight into your terminal.
 
 H4-H6 headings always fall back to ANSI bold text.
 
@@ -84,11 +84,17 @@ rm -rf ~/.termdown
 ## Usage
 
 ```sh
-# Render a file
+# Open a file in the interactive TUI (default)
 termdown README.md
 
-# Pipe from stdin
+# Force plain cat-style output (non-interactive, pipe-friendly)
+termdown --cat README.md
+
+# Pipe from stdin (always cat-style — TUI needs a real file)
 cat notes.md | termdown
+
+# Piped or redirected stdout also falls back to cat
+termdown README.md | less
 
 # Use a specific theme instead of auto-detect
 termdown --theme light README.md
@@ -100,7 +106,8 @@ termdown --version
 
 ### TUI mode
 
-For long files, use `--tui` for a vim-style interactive browser:
+The TUI is launched by default whenever you pass a file and stdout is a real
+terminal. You can also pass `--tui` to force it explicitly:
 
 ```sh
 termdown --tui README.md
