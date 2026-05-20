@@ -5,7 +5,7 @@
 <table>
 <tr>
 <td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown 渲染中文 README" /></td>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui 渲染英文 README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown 在 TUI 模式下渲染英文 README" /></td>
 </tr>
 </table>
 
@@ -99,10 +99,10 @@ termdown --version
 
 ### TUI 模式
 
-当传入文件且 stdout 为真实终端时，默认进入 TUI。也可以显式用 `--tui` 强制开启：
+当传入文件且 stdout 为真实终端时，自动进入 TUI：
 
 ```sh
-termdown --tui README.md
+termdown README.md
 ```
 
 按键绑定：

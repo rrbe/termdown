@@ -31,8 +31,9 @@ fn main() {
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
         println!("  --cat                     Force non-interactive cat-style output");
-        println!("  --tui                     Force interactive TUI mode (default when");
-        println!("                            FILE is given and stdout is a terminal)");
+        println!();
+        println!("By default, passing FILE opens it in the interactive TUI.");
+        println!("Piped/redirected stdout and stdin input automatically use cat mode.");
         println!();
         println!("Config: ~/.termdown/config.toml");
         return;
@@ -43,13 +44,7 @@ fn main() {
         return;
     }
 
-    let tui_flag = args.iter().any(|a| a == "--tui");
     let cat_flag = args.iter().any(|a| a == "--cat");
-
-    if tui_flag && cat_flag {
-        eprintln!("termdown: --tui and --cat are mutually exclusive");
-        std::process::exit(2);
-    }
 
     check_terminal_support();
 
@@ -81,27 +76,14 @@ fn main() {
         found
     };
 
-    // Decide between TUI and cat. TUI is the default when we have a real file
-    // path and stdout is a terminal; piping/redirecting falls back to cat so
-    // scripts like `termdown foo.md | less` keep working.
-    let want_tui = if cat_flag {
-        false
-    } else if tui_flag {
-        true
-    } else {
-        matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty()
-    };
+    // TUI is the default when we have a real file path and stdout is a
+    // terminal; --cat, piping/redirecting, or stdin input all fall through
+    // to cat mode so scripts like `termdown foo.md | less` keep working.
+    let want_tui =
+        !cat_flag && matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty();
 
     if want_tui {
-        let path = match file_arg.as_deref() {
-            // Only reachable via explicit `--tui`; the implicit branch above
-            // already requires a real file path.
-            Some("-") | None => {
-                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
-                std::process::exit(2);
-            }
-            Some(p) => p.to_string(),
-        };
+        let path = file_arg.expect("want_tui implies a file path");
         tui::run(&path, &config, theme);
         return;
     }

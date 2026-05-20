@@ -17,7 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `--cat` flag to force non-interactive cat-style output regardless of
-  whether stdout is a terminal. Mutually exclusive with `--tui`.
+  whether stdout is a terminal.
+
+### Removed
+- **BREAKING:** The `--tui` flag is gone. With TUI as the default it was
+  either a no-op (TTY case) or a footgun (forcing TUI when stdout is not
+  a terminal, which ratatui can't drive). Drop it from scripts.
 
 ## [0.4.0] - 2026-04-22
 

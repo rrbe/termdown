@@ -7,7 +7,7 @@ Render Markdown with large-font headings in the terminal using the Kitty graphic
 <table>
 <tr>
 <td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown --tui rendering the English README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown rendering the English README in TUI mode" /></td>
 </tr>
 </table>
 
@@ -106,11 +106,11 @@ termdown --version
 
 ### TUI mode
 
-The TUI is launched by default whenever you pass a file and stdout is a real
-terminal. You can also pass `--tui` to force it explicitly:
+The TUI launches automatically whenever you pass a file and stdout is a real
+terminal:
 
 ```sh
-termdown --tui README.md
+termdown README.md
 ```
 
 Key bindings:
