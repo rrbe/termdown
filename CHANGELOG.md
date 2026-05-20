@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **BREAKING:** Passing a Markdown file now opens the interactive TUI by
+  default instead of printing cat-style output. Use `--cat` to force the
+  previous non-interactive renderer. Pipes still work transparently:
+  `termdown FILE.md | less` and `cat FILE.md | termdown` automatically
+  fall back to cat-style output when stdout is not a terminal or input
+  comes from stdin.
+
+### Added
+- `--cat` flag to force non-interactive cat-style output regardless of
+  whether stdout is a terminal. Mutually exclusive with `--tui`.
+
 ## [0.4.0] - 2026-04-22
 
 First release published to [crates.io](https://crates.io/crates/termdown).

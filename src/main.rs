@@ -94,9 +94,10 @@ fn main() {
 
     if want_tui {
         let path = match file_arg.as_deref() {
+            // Only reachable via explicit `--tui`; the implicit branch above
+            // already requires a real file path.
             Some("-") | None => {
-                let flag = if tui_flag { "--tui" } else { "TUI mode" };
-                eprintln!("termdown: {flag} requires a FILE argument (stdin is not supported)");
+                eprintln!("termdown: --tui requires a FILE argument (stdin is not supported)");
                 std::process::exit(2);
             }
             Some(p) => p.to_string(),
