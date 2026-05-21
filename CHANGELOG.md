@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-21
+
 ### Changed
 - **BREAKING:** Passing a Markdown file now opens the interactive TUI by
   default instead of printing cat-style output. Use `--cat` to force the
@@ -76,6 +78,7 @@ First release published to [crates.io](https://crates.io/crates/termdown).
 Initial release: direct-output Markdown renderer with H1–H3 headings
 rasterized to PNG and painted via the Kitty graphics protocol.
 
+[0.5.0]: https://github.com/rrbe/termdown/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rrbe/termdown/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rrbe/termdown/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rrbe/termdown/releases/tag/v0.2.0
