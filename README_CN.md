@@ -92,6 +92,9 @@ termdown README.md | less
 # 指定主题（不使用终端亮色、暗色主题自动检测）
 termdown --theme light README.md
 
+# 关闭文档到顶/到底时的提示铃声（也可在配置中设 `bell = false`）
+termdown --no-bell README.md
+
 # 查看帮助
 termdown --help
 termdown --version
@@ -134,6 +137,10 @@ TUI 模式需要指定文件路径，不支持从 stdin 读取。
 # 主题："auto"（默认）、"dark" 或 "light"
 # 自动检测通过 OSC 11 查询终端背景色。
 theme = "auto"
+
+# 文档到顶/到底时向终端发一次 BEL。具体表现（响铃、标题栏 🔔、
+# dock 弹跳等）由终端模拟器决定。默认 true，命令行可用 `--no-bell` 关闭。
+bell = true
 
 [font.heading]
 # 英文标题字体（推荐无衬线字体）

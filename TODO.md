@@ -7,3 +7,5 @@
   - 在 `.github/workflows/ci.yml` 加一个 `msrv` job(`cargo check --all-targets` on pinned toolchain),防止以后 PR 悄悄抬高 MSRV
 - [ ] 测试 markdown metadata 支持
 - [ ] 检测文件变化
+- [x] 文件到顶、末尾时，播放声音提示，增加喇叭icon
+- [ ] t 开启目录时，支持左右等方向键在目录和内容之间切换，并可以有一些界面上的 focus 提示

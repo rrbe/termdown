@@ -357,6 +357,34 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
     }
 }
 
+/// Apply a scroll delta and ring the edge bell if the viewport didn't budge.
+/// Detection lives here (not in `Viewport`) so the data layer stays free of
+/// `App`/`Config`/audio coupling and `gg`/`G`/`]`/`[` — which bypass this
+/// helper — silently stay non-belling, matching the chosen scope.
+fn perform_scroll(app: &mut App, delta: i32) {
+    if delta == 0 {
+        return;
+    }
+    let before = app.active().viewport.top;
+    app.active_mut().viewport.scroll_by(delta);
+    if app.active().viewport.top == before {
+        ring_bell(&app.config);
+    }
+}
+
+/// Emit a terminal BEL on blocked edge-scroll. No-op when the user has
+/// disabled bells via config or `--no-bell`. Writes to stderr (which is
+/// unbuffered, so no manual flush) so the byte does not enter the
+/// alternate-screen buffer. The visible "🔔 in the title bar" effect is the
+/// terminal emulator's own response to BEL (e.g. Ghostty's `bell-features`
+/// defaults include `title`), not something termdown paints.
+fn ring_bell(config: &Config) {
+    if !config.bell.unwrap_or(true) {
+        return;
+    }
+    let _ = io::stderr().write_all(b"\x07");
+}
+
 fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
     if let Event::Key(key) = ev {
         if key.kind != event::KeyEventKind::Press {
@@ -381,16 +409,14 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             input::Action::Quit => {
                 app.should_quit = true;
             }
-            input::Action::ScrollLines(d) => app.active_mut().viewport.scroll_by(d),
+            input::Action::ScrollLines(d) => perform_scroll(app, d),
             input::Action::ScrollHalfPage(s) => {
-                let active = app.active_mut();
-                let delta = (active.viewport.height as i32 / 2) * s;
-                active.viewport.scroll_by(delta);
+                let delta = (app.active().viewport.height as i32 / 2) * s;
+                perform_scroll(app, delta);
             }
             input::Action::ScrollPage(s) => {
-                let active = app.active_mut();
-                let delta = active.viewport.height as i32 * s;
-                active.viewport.scroll_by(delta);
+                let delta = app.active().viewport.height as i32 * s;
+                perform_scroll(app, delta);
             }
             input::Action::JumpStart => app.active_mut().viewport.top = 0,
             input::Action::JumpEnd => {

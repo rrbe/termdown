@@ -31,6 +31,7 @@ fn main() {
         println!("  -V, --version             Show version");
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
         println!("  --cat                     Force non-interactive cat-style output");
+        println!("  --no-bell                 Disable the edge-scroll terminal bell");
         println!();
         println!("By default, passing FILE opens it in the interactive TUI.");
         println!("Piped/redirected stdout and stdin input automatically use cat mode.");
@@ -45,10 +46,14 @@ fn main() {
     }
 
     let cat_flag = args.iter().any(|a| a == "--cat");
+    let no_bell_flag = args.iter().any(|a| a == "--no-bell");
 
     check_terminal_support();
 
-    let config = config::load();
+    let mut config = config::load();
+    if no_bell_flag {
+        config.bell = Some(false);
+    }
 
     // Parse --theme flag (takes precedence over config).
     let cli_theme = args
