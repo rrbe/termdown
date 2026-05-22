@@ -99,6 +99,9 @@ termdown README.md | less
 # Use a specific theme instead of auto-detect
 termdown --theme light README.md
 
+# Disable the edge-scroll bell (also configurable via `bell = false`)
+termdown --no-bell README.md
+
 # View help
 termdown --help
 termdown --version
@@ -142,6 +145,12 @@ termdown reads configuration from `~/.termdown/config.toml`.
 # Theme: "auto" (default), "dark", or "light"
 # Auto-detection queries the terminal background color via OSC 11.
 theme = "auto"
+
+# Vim-style edge bell: emit a terminal BEL when you scroll past the
+# top/bottom of the document. The terminal emulator decides the visible
+# effect (audible beep, title-bar 🔔, dock bounce, …). Default true.
+# CLI: `--no-bell`.
+bell = true
 
 [font.heading]
 # English heading font (sans-serif recommended)

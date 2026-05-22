@@ -9,6 +9,13 @@ pub struct Config {
 
     /// Theme override: "dark", "light", or "auto" (default).
     pub theme: Option<String>,
+
+    /// Vim-style edge bell: emit a terminal BEL when the user tries to scroll
+    /// past the top or bottom of the document. The terminal emulator decides
+    /// the visible effect (audible beep, title-bar 🔔, dock bounce, …) — see
+    /// e.g. Ghostty's `bell-features`. `None` means default (on). CLI
+    /// `--no-bell` overrides to `Some(false)`.
+    pub bell: Option<bool>,
 }
 
 #[derive(Deserialize, Default, Clone)]

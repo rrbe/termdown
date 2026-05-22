@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Vim-style edge bell: scrolling past the top or bottom now emits a
+  terminal BEL. The visible effect (audible beep, title-bar 🔔, dock
+  bounce) is up to the terminal emulator — e.g. Ghostty surfaces a 🔔
+  in the window title via its default `bell-features`. Triggers on
+  `j`/`k`, `d`/`u`, `f`/`b`/`Space`/`PgUp`/`PgDn`; explicit jumps
+  (`gg`, `G`, `]`, `[`) stay silent. Disable with `--no-bell` or
+  `bell = false` in `~/.termdown/config.toml`.
+
 ### Changed
 - Removed the 4-column outer margin that cat mode and TUI body rows
   shared, plus the additional 2-column inset on cat-mode table rows.
