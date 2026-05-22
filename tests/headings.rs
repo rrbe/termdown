@@ -1,38 +1,20 @@
+mod common;
+
 use base64::Engine;
 use image::ImageReader;
 use std::io::Cursor;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
-fn binary_path() -> &'static str {
-    env!("CARGO_BIN_EXE_termdown")
-}
-
-fn run_termdown(path: &Path) -> Vec<u8> {
-    let out = Command::new(binary_path())
-        .arg("--theme")
-        .arg("dark")
-        .arg(path)
-        .env("TERM_PROGRAM", "ghostty")
-        .env_remove("HOME")
-        .env_remove("USERPROFILE")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("termdown should run");
-    assert!(
-        out.status.success(),
-        "termdown failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    out.stdout
-}
+use common::run_termdown;
 
 /// Walk `out` looking for Kitty graphics protocol APC frames
 /// (`ESC _ G <header> ; <payload> ESC \`). Frames where the header has `m=1`
 /// continue the current image; `m=0` (or absent) terminates it. Returns one
 /// decoded PNG byte vector per emitted image.
+///
+/// Panics if an APC frame is not terminated by `ESC \` — a regression where
+/// termdown truncates output should surface as a clear parse error here,
+/// not as a confusing base64-decode failure downstream.
 fn extract_kitty_pngs(out: &[u8]) -> Vec<Vec<u8>> {
     let mut images = Vec::new();
     let mut current_b64 = String::new();
@@ -54,9 +36,18 @@ fn extract_kitty_pngs(out: &[u8]) -> Vec<Vec<u8>> {
             sep
         };
         let mut end = payload_start;
-        while end + 1 < out.len() && !(out[end] == 0x1b && out[end + 1] == b'\\') {
+        let mut terminated = false;
+        while end + 1 < out.len() {
+            if out[end] == 0x1b && out[end + 1] == b'\\' {
+                terminated = true;
+                break;
+            }
             end += 1;
         }
+        assert!(
+            terminated,
+            "unterminated kitty APC frame starting at byte offset {i}"
+        );
         let chunk = std::str::from_utf8(&out[payload_start..end]).expect("APC payload is ASCII");
         current_b64.push_str(chunk);
 
@@ -78,6 +69,19 @@ fn extract_kitty_pngs(out: &[u8]) -> Vec<Vec<u8>> {
 fn h1_h2_h3_emit_decodable_pngs_with_descending_heights() {
     let fixture = Path::new("fixtures/headings.md");
     let stdout = run_termdown(fixture);
+
+    // The very first APC frame must use the display form (`a=T`, transmit +
+    // display in one go). The lifecycle form (`a=t`, transmit-only, used by
+    // the TUI for cached placements) would not paint anything when run via
+    // `cat` mode and would silently regress the heading-rendering pipeline.
+    let display_header: &[u8] = b"\x1b_Gf=100,a=T";
+    assert!(
+        stdout
+            .windows(display_header.len())
+            .any(|w| w == display_header),
+        "expected display-form kitty header (\\x1b_Gf=100,a=T) in stdout"
+    );
+
     let pngs = extract_kitty_pngs(&stdout);
 
     assert_eq!(
