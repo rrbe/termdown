@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Removed the 4-column outer margin that cat mode and TUI body rows
+  shared, plus the additional 2-column inset on cat-mode table rows.
+  Content now starts at column 0. The gutter originally mirrored `glow`;
+  with TUI as the default it cost 4 cols for no remaining visual gain.
+
 ## [0.5.0] - 2026-05-21
 
 ### Changed

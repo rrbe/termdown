@@ -195,3 +195,18 @@ Residual items from Rounds 1-3. Test on both Ghostty and iTerm2:
   hypotheses tested.
 - Keep `make check` green at each round; manual-only behavior fixes
   still need snapshot validation that cat mode is unaffected.
+
+---
+
+## Update — 2026-05-22: `MARGIN_WIDTH` is gone
+
+This log references `MARGIN_WIDTH` in the H3 bug analysis ("No
+`MARGIN_WIDTH` prefix on TUI body RLines", "column aligns with image
+column (`MARGIN_WIDTH = 4`)"). That constant — along with the 4-space
+outer margin that mirrored `glow` — has been removed now that TUI is the
+default mode. Body rows in both cat and TUI start at column 0; heading
+images are placed at column 0 (or column 30 when the ToC panel is open).
+
+The H3 fix described in the original log is unaffected in spirit: heading
+images still need to be placed at the same column where the text would
+have rendered. The number is just `0`/`30` now instead of `4`/`34`.

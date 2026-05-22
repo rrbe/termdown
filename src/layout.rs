@@ -305,8 +305,8 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             Event::Start(Tag::Item) => {
                 in_item = true;
                 // Reset the per-item buffer and seed it with the marker that this
-                // item needs (bullet or number). Indentation is baked in so
-                // cat.rs only needs to append a margin.
+                // item needs (bullet or number). Indentation is baked in so cat
+                // and TUI can emit the spans verbatim.
                 spans.clear();
                 text_buf.clear();
                 let depth = list_stack.len();
@@ -773,9 +773,9 @@ fn strip_html_comments(s: &str) -> String {
     out
 }
 
-/// Render accumulated table rows into `LineKind::Table` lines with padding and separators.
-/// Keeps the margin-less column layout the existing cat mode produces — the outer
-/// "    " margin is added by `cat.rs`.
+/// Render accumulated table rows into `LineKind::Table` lines with padding
+/// and separators. Cells start at column 0; the renderer emits the spans
+/// verbatim.
 fn emit_table(lines: &mut Vec<Line>, rows: &[Vec<Vec<Span>>]) {
     if rows.is_empty() {
         return;

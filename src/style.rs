@@ -82,11 +82,6 @@ pub fn heading_style(level: u8, theme: Theme) -> HeadingStyle {
     }
 }
 
-// ─── Layout ─────────────────────────────────────────────────────────────────
-
-pub const MARGIN: &str = "    ";
-pub const MARGIN_WIDTH: usize = 4;
-
 // ─── ANSI Escape Codes ──────────────────────────────────────────────────────
 
 pub const BOLD_ON: &str = "\x1b[1m";

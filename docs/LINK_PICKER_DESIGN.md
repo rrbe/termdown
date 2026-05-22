@@ -79,3 +79,16 @@ They are complementary. A realistic plan could be:
 2. Revisit **C** later if the inline-hint flow feels worth the rendering complexity.
 
 Either way, the status-bar `take(9)` overlay should be retired once a replacement lands.
+
+---
+
+## Update — 2026-05-22: `MARGIN_WIDTH` gutter no longer exists
+
+The constraint phrased as "must not shift the body layout's column
+alignment for heading images (`MARGIN_WIDTH` gutter)" referenced the
+4-column outer margin that cat mode and TUI body rows used to share.
+That gutter was removed (along with the `MARGIN_WIDTH` constant) now
+that TUI is the default mode. The underlying constraint still holds —
+label/prefix spans added by any future link picker must not shift the
+column where heading images land — but the alignment column is now `0`
+(or `30` when ToC is open), not `4` / `34`.
