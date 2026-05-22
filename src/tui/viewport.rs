@@ -127,8 +127,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
     use crate::layout::LineKind;
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-    // Reserve margin (4 cols) to match cat-mode indent.
-    let max: usize = (width as usize).saturating_sub(4);
+    let max: usize = width as usize;
 
     let mut out = Vec::with_capacity(lines.len());
     for (li, line) in lines.iter().enumerate() {
@@ -456,7 +455,7 @@ mod tests {
         };
         let mut vp = Viewport::new(10, 20);
         vp.ensure_wrap(&doc);
-        // With max width 20 - 4 (margin) = 16 cols, 24 cols should split into 2 visual lines.
+        // With max width 20 cols, 24 cols should split into 2 visual lines.
         assert!(
             vp.total_visual_lines() >= 2,
             "CJK content should wrap across lines"

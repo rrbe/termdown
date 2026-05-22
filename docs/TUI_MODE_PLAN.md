@@ -3299,3 +3299,30 @@ git commit -m "chore: bump version to 0.4.0"
 - **Placeholders:** No TBD/TODO in code. Where a task body mentions "refined in Phase N", the referenced task implements it.
 - **Type consistency:** `Style` fields (`fg/bg/bold/italic/underline/strikethrough/dim`) introduced in Task 1.1 are used consistently through `cat.rs` (Task 1.8) and `viewport.rs`/`search.rs`. `HeadingImage` moved to `render.rs` in Task 1.1 and re-referenced in `tui/kitty.rs` (Task 3.2) via path `crate::render::HeadingImage`. Kitty protocol APIs in Task 3.1 (`transmit/place/delete_placement/delete_all_for_client`) are the ones called by `ImageLifecycle` in Task 3.2.
 - **Known manual gates:** Task 1.9 requires human audit of snapshot diffs; Task 8.1 is the Ghostty/iTerm2 QA pass. Both are called out explicitly.
+
+---
+
+## Update — 2026-05-22: Outer margin removed
+
+The original plan reserved a 4-column outer margin (`MARGIN` = `"    "`,
+`MARGIN_WIDTH` = `4`) on every cat-mode line and on every TUI body row,
+mirroring `glow`'s gutter. With TUI now the default mode (post-v0.5.0), the
+gutter cost a fixed 4 columns of horizontal real estate for no remaining
+visual win, so it has been removed entirely.
+
+What changed vs. the snippets in this plan:
+
+- `src/style.rs` — `MARGIN` and `MARGIN_WIDTH` constants deleted.
+- `src/cat.rs` — every `{MARGIN}` prefix dropped from `write_line` /
+  `emit_code_block` / `write_paragraph`; `prefix_visual_width` drops the
+  `MARGIN_WIDTH` term (only quote bars contribute); `wrap_and_write` no
+  longer subtracts margin from `term_width`.
+- `src/tui/mod.rs` — the per-row leading-space span is gone; the heading
+  image `col_offset` collapses to `0` when ToC is closed and `30` when it
+  is open.
+- `src/tui/viewport.rs` — `wrap_all` no longer reserves 4 cols.
+
+Snapshot fixtures under `fixtures/expected/*.ansi` were regenerated. The
+visible diff is exactly: leading `"    "` removed from each rendered line,
+and wrap points shift later (because each line now has 4 more usable
+columns). All `make check` gates remain green.

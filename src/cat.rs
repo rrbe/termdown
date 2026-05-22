@@ -1,14 +1,13 @@
-//! Stream a `RenderedDoc` to stdout as ANSI text, matching the existing
-//! cat-mode visual output. Wrapping, margins, quote prefixes, list
-//! indentation, and Kitty heading image emission all happen here.
+//! Stream a `RenderedDoc` to stdout as ANSI text. Wrapping, quote prefixes,
+//! list indentation, and Kitty heading image emission all happen here.
 
 use std::io::{BufWriter, Write};
 
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
 use crate::render;
 use crate::style::{
-    display_width, Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, MARGIN, MARGIN_WIDTH, RESET,
-    STRIKETHROUGH_OFF, STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
+    display_width, Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, RESET, STRIKETHROUGH_OFF,
+    STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
 };
 
 pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors) {
@@ -51,17 +50,17 @@ fn write_line<W: Write>(
         }
         LineKind::HorizontalRule => {
             let width = term_width.min(62).saturating_sub(2);
-            let _ = writeln!(out, "{MARGIN}{DIM_ON}{}{RESET}", "\u{2500}".repeat(width));
+            let _ = writeln!(out, "{DIM_ON}{}{RESET}", "\u{2500}".repeat(width));
         }
         LineKind::Heading { id, .. } => {
             if let Some(image_id) = id {
                 if let Some(img) = images.iter().find(|i| i.id == *image_id) {
-                    let _ = writeln!(out, "{MARGIN}{}", render::kitty_display(&img.png));
+                    let _ = writeln!(out, "{}", render::kitty_display(&img.png));
                     return;
                 }
             }
             let text = render_spans_plain(&line.spans);
-            let _ = writeln!(out, "{MARGIN}{BOLD_ON}{text}{RESET}");
+            let _ = writeln!(out, "{BOLD_ON}{text}{RESET}");
         }
         LineKind::BlockQuote { depth } => {
             write_paragraph(out, &line.spans, *depth as usize, term_width, colors);
@@ -70,26 +69,20 @@ fn write_line<W: Write>(
             write_paragraph(out, &line.spans, 0, term_width, colors);
         }
         LineKind::ListItem { .. } => {
-            // Layout has already baked the per-depth indent and the bullet or
-            // numbered marker into the first text span, so cat only needs to
-            // prepend the outer margin.
+            // Layout has already baked the indent and bullet/number marker
+            // into the first text span.
             let body = render_spans_ansi(&line.spans, colors);
-            let buf = format!("{MARGIN}{body}");
-            wrap_and_write(out, &buf, term_width, "");
+            wrap_and_write(out, &body, term_width);
         }
         LineKind::CodeBlock { .. } => {
             // Single-line code blocks are handled via emit_code_block; this
             // branch is unreachable in practice because `print` batches them.
             let text = render_spans_plain(&line.spans);
-            let _ = writeln!(
-                out,
-                "{MARGIN}{}{} {text} {RESET}",
-                colors.code_bg, colors.code_fg
-            );
+            let _ = writeln!(out, "{}{} {text} {RESET}", colors.code_bg, colors.code_fg);
         }
         LineKind::Table => {
             let rendered = render_spans_ansi(&line.spans, colors);
-            let _ = writeln!(out, "{MARGIN}  {rendered}");
+            let _ = writeln!(out, "{rendered}");
         }
     }
 }
@@ -103,7 +96,7 @@ fn emit_code_block<W: Write>(out: &mut W, group: &[Line], colors: &Colors) {
         let pad = max_w.saturating_sub(display_width(text));
         let _ = writeln!(
             out,
-            "{MARGIN}{}{} {text}{} {RESET}",
+            "{}{} {text}{} {RESET}",
             colors.code_bg,
             colors.code_fg,
             " ".repeat(pad)
@@ -123,13 +116,12 @@ fn write_paragraph<W: Write>(
         let bars: String = (0..quote_depth)
             .map(|_| format!("{}\u{2502}  ", colors.quote_bar))
             .collect();
-        format!("{MARGIN}{bars}{}", colors.quote_text)
+        format!("{bars}{}", colors.quote_text)
     } else {
-        MARGIN.to_string()
+        String::new()
     };
     let suffix = if quote_depth > 0 { RESET } else { "" };
-    let prefix_visual_width = MARGIN_WIDTH + quote_depth * 3;
-    let max_text_width = term_width.saturating_sub(prefix_visual_width);
+    let max_text_width = term_width.saturating_sub(quote_depth * 3);
 
     if max_text_width == 0 || display_width(&body) <= max_text_width {
         let _ = writeln!(out, "{prefix}{body}{suffix}");
@@ -140,14 +132,13 @@ fn write_paragraph<W: Write>(
     }
 }
 
-fn wrap_and_write<W: Write>(out: &mut W, text: &str, term_width: usize, suffix: &str) {
-    let max = term_width.saturating_sub(MARGIN_WIDTH);
-    if max == 0 || display_width(text) <= max {
-        let _ = writeln!(out, "{text}{suffix}");
+fn wrap_and_write<W: Write>(out: &mut W, text: &str, term_width: usize) {
+    if display_width(text) <= term_width {
+        let _ = writeln!(out, "{text}");
         return;
     }
-    for wrapped in wrap_text(text, max) {
-        let _ = writeln!(out, "{wrapped}{suffix}");
+    for wrapped in wrap_text(text, term_width) {
+        let _ = writeln!(out, "{wrapped}");
     }
 }
 
@@ -305,7 +296,7 @@ mod tests {
     #[test]
     fn write_paragraph_wraps_quoted_content() {
         use crate::layout::{Span, Style};
-        use crate::style::{Colors, MARGIN};
+        use crate::style::Colors;
         use crate::theme::Theme;
 
         let colors = Colors::for_theme(Theme::Dark);
@@ -316,16 +307,12 @@ mod tests {
             style: Style::default(),
         }];
 
-        // width=12, quote_depth=1 → prefix width = MARGIN_WIDTH(2) + 1*3 = 5,
-        // so max_text_width = 12 - 5 = 7. "alpha" fits (5), "beta" fits (4 → 9
-        // > 7 alone? No: 5+1+4=10 > 7), so lines: "alpha", "beta", "gamma".
-        write_paragraph(&mut out, &spans, 1, 12, &colors);
+        // width=8, quote_depth=1 → prefix width = 1*3 = 3, max_text_width =
+        // 8 - 3 = 5. Each word ("alpha"/"beta"/"gamma") is on its own line.
+        write_paragraph(&mut out, &spans, 1, 8, &colors);
 
         let got = String::from_utf8(out).unwrap();
-        let prefix = format!(
-            "{MARGIN}{}\u{2502}  {}",
-            colors.quote_bar, colors.quote_text
-        );
+        let prefix = format!("{}\u{2502}  {}", colors.quote_bar, colors.quote_text);
         // Each wrapped word should appear on its own prefixed line.
         assert!(got.contains(&format!("{prefix}alpha{RESET}")));
         assert!(got.contains(&format!("{prefix}beta{RESET}")));

@@ -142,7 +142,7 @@ fn stdin_rendering_works_without_terminal_warning_when_supported() {
     let output = run_termdown(&["-"], Some("hello\n"), &[("TERM_PROGRAM", "ghostty")], &[]);
 
     assert!(output.status.success());
-    assert_eq!(stdout_text(&output), "    hello\n");
+    assert_eq!(stdout_text(&output), "hello\n");
     assert!(stderr_text(&output).trim().is_empty());
 }
 
@@ -159,8 +159,8 @@ fn file_input_renders_table_output() {
 
     assert!(output.status.success());
     assert!(stderr_text(&output).trim().is_empty());
-    assert!(stdout.contains("    A  │  B"));
-    assert!(stdout.contains("    x  │  long"));
+    assert!(stdout.contains("A  │  B"));
+    assert!(stdout.contains("x  │  long"));
 }
 
 #[test]
@@ -204,12 +204,9 @@ fn html_inline_tags_map_to_ansi_and_block_renders_dim() {
         "clean output was: {clean:?}"
     );
     // Block HTML lines preserved verbatim.
-    assert!(clean.contains("    <div>"), "clean output was: {clean:?}");
-    assert!(
-        clean.contains("    <p>x</p>"),
-        "clean output was: {clean:?}"
-    );
-    assert!(clean.contains("    </div>"), "clean output was: {clean:?}");
+    assert!(clean.contains("<div>"), "clean output was: {clean:?}");
+    assert!(clean.contains("<p>x</p>"), "clean output was: {clean:?}");
+    assert!(clean.contains("</div>"), "clean output was: {clean:?}");
 
     // ANSI codes present in raw output: bold (\x1b[1m) and underline (\x1b[4m).
     assert!(raw.contains("\x1b[1m"), "raw output: {raw:?}");
@@ -226,7 +223,7 @@ fn unsupported_terminal_emits_warning_on_stderr() {
     );
 
     assert!(output.status.success());
-    assert_eq!(stdout_text(&output), "    hello\n");
+    assert_eq!(stdout_text(&output), "hello\n");
     let stderr = stderr_text(&output);
     assert!(stderr.contains("termdown: warning: terminal may not support Kitty graphics protocol"));
     assert!(stderr.contains("termdown: headings require Ghostty, Kitty, WezTerm, or iTerm2"));

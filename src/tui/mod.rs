@@ -21,11 +21,13 @@ use tui_textarea::TextArea;
 
 use crate::config::Config;
 use crate::layout;
-use crate::style::MARGIN_WIDTH;
 use crate::theme::Theme;
 use crate::tui::search::SearchState;
 
 use viewport::Viewport;
+
+/// Width of the Table-of-Contents side panel when it is open.
+const TOC_PANEL_WIDTH: u16 = 30;
 
 enum Mode {
     Normal,
@@ -283,7 +285,7 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
         let size = terminal.size()?;
         let body_height = size.height.saturating_sub(1);
         let body_width = if app.active().toc_open {
-            size.width.saturating_sub(30)
+            size.width.saturating_sub(TOC_PANEL_WIDTH)
         } else {
             size.width
         };
@@ -826,13 +828,6 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         })
     });
 
-    // Every body row is prefixed with this margin so TUI indentation matches
-    // cat mode's 4-col gutter. Without it, text starts at column 0 of the
-    // body area, clashing visually with heading images (which are placed at
-    // the MARGIN_WIDTH column offset to align with cat mode's output).
-    let margin = " ".repeat(MARGIN_WIDTH);
-    let margin_span = RSpan::raw(margin);
-
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in active.viewport.visible() {
         let logical = &active.doc.lines[vl.logical_index];
@@ -853,17 +848,14 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             current_logical,
         );
         let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches, app.theme);
-        let mut full_spans: Vec<RSpan> = Vec::with_capacity(rspans.len() + 1);
-        full_spans.push(margin_span.clone());
-        full_spans.extend(rspans);
-        rendered.push(RLine::from(full_spans));
+        rendered.push(RLine::from(rspans));
     }
 
     let body_area = if active.toc_open {
         let split = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([
-                ratatui::layout::Constraint::Length(30),
+                ratatui::layout::Constraint::Length(TOC_PANEL_WIDTH),
                 ratatui::layout::Constraint::Min(20),
             ])
             .split(chunks[0]);
@@ -1249,12 +1241,8 @@ fn refine_image_rows(doc: &mut layout::RenderedDoc, cell_px_height: u32) {
 
 fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     let active = app.active();
-    let col_offset: u16 = if active.toc_open {
-        // ToC panel (30) + margin within body panel (MARGIN_WIDTH).
-        30 + MARGIN_WIDTH as u16
-    } else {
-        MARGIN_WIDTH as u16
-    };
+    // Heading images must start past the ToC panel when it is open.
+    let col_offset: u16 = if active.toc_open { TOC_PANEL_WIDTH } else { 0 };
     // When the help popup is open, drop placements whose rows intersect the
     // popup rectangle. Kitty images live on a separate graphics layer, so
     // without this they would show through the popup; dropping them all
