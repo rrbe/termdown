@@ -368,21 +368,21 @@ fn perform_scroll(app: &mut App, delta: i32) {
     let before = app.active().viewport.top;
     app.active_mut().viewport.scroll_by(delta);
     if app.active().viewport.top == before {
-        ring_bell(app);
+        ring_bell(&app.config);
     }
 }
 
 /// Emit a terminal BEL on blocked edge-scroll. No-op when the user has
-/// disabled bells via config or `--no-bell`. Writes to stderr so the byte
-/// does not enter the alternate-screen buffer. The visible "🔔 in the title
-/// bar" effect is the terminal emulator's own response to BEL (e.g. Ghostty's
-/// `bell-features` defaults include `title`), not something termdown paints.
-fn ring_bell(app: &App) {
-    if !app.config.bell.unwrap_or(true) {
+/// disabled bells via config or `--no-bell`. Writes to stderr (which is
+/// unbuffered, so no manual flush) so the byte does not enter the
+/// alternate-screen buffer. The visible "🔔 in the title bar" effect is the
+/// terminal emulator's own response to BEL (e.g. Ghostty's `bell-features`
+/// defaults include `title`), not something termdown paints.
+fn ring_bell(config: &Config) {
+    if !config.bell.unwrap_or(true) {
         return;
     }
-    let _ = std::io::Write::write_all(&mut std::io::stderr(), b"\x07");
-    let _ = std::io::Write::flush(&mut std::io::stderr());
+    let _ = io::stderr().write_all(b"\x07");
 }
 
 fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
