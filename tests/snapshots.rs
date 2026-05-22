@@ -1,10 +1,9 @@
+mod common;
+
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
-fn binary_path() -> &'static str {
-    env!("CARGO_BIN_EXE_termdown")
-}
+use common::run_termdown;
 
 /// Replace each run of kitty image APC sequences (`ESC _ G ... ESC \`) with a
 /// single `<IMG>` marker. Font rasterization produces OS-specific PNG bytes
@@ -39,20 +38,8 @@ fn strip_kitty_images(s: &str) -> String {
 }
 
 fn render(path: &Path) -> String {
-    let out = Command::new(binary_path())
-        .arg("--theme")
-        .arg("dark")
-        .arg(path)
-        .env("TERM_PROGRAM", "ghostty")
-        .env_remove("HOME")
-        .env_remove("USERPROFILE")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("termdown should run");
-    assert!(out.status.success(), "termdown failed on {path:?}");
-    let raw = String::from_utf8(out.stdout).expect("valid utf-8");
+    let stdout = run_termdown(path);
+    let raw = String::from_utf8(stdout).expect("valid utf-8");
     strip_kitty_images(&raw)
 }
 
