@@ -1832,7 +1832,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 
 - [ ] **Step 2: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: content shows, `j`/`k` scrolls, `q` exits.
 
 - [ ] **Step 3: `make check`**
@@ -1941,7 +1941,7 @@ Add `mod input;` to `src/tui/mod.rs`.
 
 - [ ] **Step 3: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: d/u/f/b/PageUp/PageDown/Space/G work. Single g doesn't yet do anything useful — Task 4.1 adds the two-key gg sequence.
 
 - [ ] **Step 4: `make check`**
@@ -2288,7 +2288,7 @@ for span in &logical.spans {
 
 - [ ] **Step 3: Manual smoke test in Ghostty**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: headings show as images; body text wraps around them; scrolling moves images and text together; `q` exits without residue.
 
 - [ ] **Step 4: `make check`**
@@ -2354,7 +2354,7 @@ Delete the `KeyCode::Char('g') => Action::JumpStart,` line in `map_normal`.
 
 - [ ] **Step 3: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: pressing `g` once does nothing; `gg` jumps to top.
 
 - [ ] **Step 4: Commit**
@@ -2512,7 +2512,7 @@ Extend `App::new` to take `path: String` and store it.
 
 - [ ] **Step 3: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: bottom line shows path + percentage; it updates as you scroll.
 
 - [ ] **Step 4: Commit**
@@ -2609,7 +2609,7 @@ Expected: PASS (including existing ones).
 
 - [ ] **Step 4: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax-zh.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Expected: long paragraphs wrap at terminal width; CJK width correct.
 
 - [ ] **Step 5: Commit**
@@ -2861,7 +2861,7 @@ Add a `pub fn visual_lines_iter(&self) -> std::slice::Iter<'_, VisualLine>` help
 
 - [ ] **Step 5: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`
+Run: `cargo run -- --tui fixtures/supported-syntax.md`
 Press `/`, type a word, Enter → viewport jumps to first match. Esc cancels. `?` starts reverse.
 
 - [ ] **Step 6: `make check`**
@@ -2944,7 +2944,7 @@ Use the match's `byte_range` start/end to split the text into before/match/after
 
 - [ ] **Step 3: Manual smoke test**
 
-Run: `cargo run -- --tui fixtures/full-syntax.md`, `/word<Enter>` → all `word` occurrences highlighted; `n`/`N` moves the brighter one.
+Run: `cargo run -- --tui fixtures/supported-syntax.md`, `/word<Enter>` → all `word` occurrences highlighted; `n`/`N` moves the brighter one.
 
 - [ ] **Step 4: Commit**
 

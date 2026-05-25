@@ -60,20 +60,8 @@ fn check_snapshot(fixture: &str) {
 }
 
 #[test]
-fn snapshot_emoji_test() {
-    check_snapshot("emoji-test");
-}
-#[test]
-fn snapshot_full_syntax_zh() {
-    check_snapshot("full-syntax-zh");
-}
-#[test]
-fn snapshot_full_syntax() {
-    check_snapshot("full-syntax");
-}
-#[test]
-fn snapshot_tasklist() {
-    check_snapshot("tasklist");
+fn snapshot_supported_syntax() {
+    check_snapshot("supported-syntax");
 }
 #[test]
 fn snapshot_unsupported_syntax() {

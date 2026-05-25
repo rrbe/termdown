@@ -1,39 +1,20 @@
----
-title: Unsupported / Partially-Supported Syntax
-author: termdown
-tags: [markdown, test, fixture]
----
-
 # Unsupported Syntax Showcase
 
-This fixture collects every Markdown feature listed as **missing** or **partial** in
-`docs/MARKDOWN_FEATURE_COVERAGE.md`. Use it to verify what termdown renders today and
-as a regression fixture as features are added.
+This fixture collects Markdown features termdown does **not** plan to support, or
+treats as out-of-scope. It exists to lock the current "graceful degradation"
+rendering as a snapshot — so if rendering accidentally improves or regresses for
+one of these, the snapshot will diff.
 
-The YAML frontmatter above should be hidden by the renderer. Currently it leaks into
-the rendered output.
+Features that are on the **roadmap** (HTML tags, images, markdown frontmatter,
+long-text wrap & indent) live in `supported-syntax.md`, not here.
 
-## 1. HTML blocks and inline HTML
-
-A raw HTML block:
-
-<div style="padding: 8px; border: 1px solid #ccc;">
-  <strong>Hello</strong> from inline HTML.
-</div>
-
-Inline HTML in a paragraph: this word is <u>underlined via HTML</u> and this one is
-<span style="color: red">red via HTML</span>. An inline <br/> break and an
-<abbr title="HyperText Markup Language">HTML</abbr> abbreviation.
-
-An HTML comment: <!-- this comment should not appear --> end of line.
-
-## 2. GFM autolinks (bare URLs)
+## 1. GFM autolinks (bare URLs)
 
 Bare URL: https://example.com/docs/readme.html
 Bare email: support@example.com
 URL in text: visit https://github.com/rrbe/termdown for the source.
 
-## 3. GFM alerts / admonitions
+## 2. GFM alerts / admonitions
 
 > [!NOTE]
 > Useful information that users should know, even when skimming content.
@@ -50,7 +31,7 @@ URL in text: visit https://github.com/rrbe/termdown for the source.
 > [!CAUTION]
 > Advises about risks or negative outcomes of certain actions.
 
-## 4. Footnotes
+## 3. Footnotes
 
 Here is a sentence with a footnote.[^1] And another one.[^longnote]
 
@@ -62,7 +43,7 @@ Inline footnote: text with an inline footnote.^[This is an inline footnote body.
     paragraphs. It should render as a numbered reference in the main text,
     with the body collected at the bottom of the document.
 
-## 5. Math (LaTeX)
+## 4. Math (LaTeX)
 
 Inline math: the Pythagorean theorem says $a^2 + b^2 = c^2$.
 
@@ -78,7 +59,7 @@ $$
 A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}
 $$
 
-## 6. Definition list
+## 5. Definition list
 
 Term 1
 : Definition of term 1.
@@ -94,21 +75,21 @@ Apple
 Orange
 : A citrus fruit with a tough rind.
 
-## 7. Smart punctuation
+## 6. Smart punctuation
 
 Straight quotes that should become curly: "Hello," she said. 'Yes,' he replied.
 Ellipsis from three dots... and an em-dash -- like this, and an en-dash -- too.
 
-## 8. Wikilinks
+## 7. Wikilinks
 
 Reference a page with [[WikiLink]] syntax, and with an alias like
 [[Target Page|the display text]].
 
-## 9. Subscript and superscript
+## 8. Subscript and superscript
 
 Water is H~2~O and Einstein said E=mc^2^. Also 10^th^ and x~n+1~.
 
-## 10. Mermaid diagrams
+## 9. Mermaid diagrams
 
 A flowchart:
 
@@ -143,7 +124,7 @@ classDiagram
     Animal <|-- Cat
 ```
 
-## 11. PlantUML / Graphviz
+## 10. PlantUML / Graphviz
 
 ```plantuml
 @startuml
@@ -160,14 +141,10 @@ digraph G {
 }
 ```
 
-## 12. Code block with language (no highlighting today)
+## 11. Code block syntax highlighting
 
-```rust
-fn main() {
-    let greeting = "Hello, termdown!";
-    println!("{}", greeting);
-}
-```
+Fenced blocks with a language tag are recognized but the contents are not
+syntax-highlighted today — only the structure is preserved.
 
 ```python
 def fib(n: int) -> int:
@@ -185,36 +162,12 @@ def fib(n: int) -> int:
 }
 ```
 
-## 13. Images (placeholder vs real render)
-
-Local image (does not exist, exercises error path):
-
-![local image alt](./fixtures/nonexistent.png "An image title")
-
-Remote image:
-
-![remote image](https://example.com/banner.png "Banner")
-
-Reference-style image:
-
-![ref image][banner]
-
-[banner]: https://example.com/banner.png "Banner title"
-
-## 14. Emoji shortcodes
+## 12. Emoji shortcodes
 
 Shortcodes like :smile:, :rocket:, :tada: should ideally become 😄 🚀 🎉.
 Unicode emoji themselves work fine: 😄 🚀 🎉.
 
-## 15. Tables with advanced alignment
-
-| Left | Center | Right |
-| :--- | :----: | ----: |
-| a    |   b    |     c |
-| long left content | center | 1 |
-| x    | **bold** in cell | `code` |
-
 ## End
 
-If every section above renders with rich formatting, termdown has full coverage of the
-audited feature set.
+If every section above renders with at least *some* graceful fallback,
+termdown is degrading correctly on out-of-scope syntax.
