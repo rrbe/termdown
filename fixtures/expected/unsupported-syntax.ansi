@@ -1,32 +1,12 @@
-[2m────────────────────────────────────────────────────────────[0m
-
 <IMG>
 
-<IMG>
+This fixture collects Markdown features termdown does [1mnot[0m plan to support, or
+treats as out-of-scope. It exists to lock the current "graceful degradation"
+rendering as a snapshot — so if rendering accidentally improves or regresses for
+one of these, the snapshot will diff.
 
-This fixture collects every Markdown feature listed as [1mmissing[0m or [1mpartial[0m in
-[38;5;213m[48;5;236m docs/MARKDOWN_FEATURE_COVERAGE.md [0m. Use it to verify what termdown renders
-today and
-as a regression fixture as features are added.
-
-The YAML frontmatter above should be hidden by the renderer. Currently it leaks
-into
-the rendered output.
-
-<IMG>
-
-A raw HTML block:
-
-[2m<div style="padding: 8px; border: 1px solid #ccc;">[0m
-[2m  <strong>Hello</strong> from inline HTML.[0m
-[2m</div>[0m
-
-Inline HTML in a paragraph: this word is [4munderlined via HTML[24m and this one is
-red via HTML. An inline 
- break and an
-HTML abbreviation.
-
-An HTML comment:  end of line.
+Features that are on the [1mroadmap[0m (HTML tags, images, markdown frontmatter,
+long-text wrap & indent) live in [38;5;213m[48;5;236m supported-syntax.md [0m, not here.
 
 <IMG>
 
@@ -154,10 +134,8 @@ A class diagram:
 
 <IMG>
 
-[48;5;236m[38;5;213m fn main() {                            [0m
-[48;5;236m[38;5;213m     let greeting = "Hello, termdown!"; [0m
-[48;5;236m[38;5;213m     println!("{}", greeting);          [0m
-[48;5;236m[38;5;213m }                                      [0m
+Fenced blocks with a language tag are recognized but the contents are not
+syntax-highlighted today — only the structure is preserved.
 
 [48;5;236m[38;5;213m def fib(n: int) -> int: [0m
 [48;5;236m[38;5;213m     a, b = 0, 1         [0m
@@ -173,33 +151,10 @@ A class diagram:
 
 <IMG>
 
-Local image (does not exist, exercises error path):
-
-[2m[🖼 local image alt](./fixtures/nonexistent.png)[0m
-
-Remote image:
-
-[2m[🖼 remote image](https://example.com/banner.png)[0m
-
-Reference-style image:
-
-[2m[🖼 ref image](https://example.com/banner.png)[0m
-
-<IMG>
-
 Shortcodes like :smile:, :rocket:, :tada: should ideally become 😄 🚀 🎉.
 Unicode emoji themselves work fine: 😄 🚀 🎉.
 
 <IMG>
 
-[1mLeft[0m             [2m  │  [0m[1mCenter[0m      [2m  │  [0m[1mRight[0m 
-[2m─────────────────[0m[2m  ┼  [0m[2m────────────[0m[2m  ┼  [0m[2m──────[0m
-a                [2m  │  [0mb           [2m  │  [0mc     
-long left content[2m  │  [0mcenter      [2m  │  [0m1     
-x                [2m  │  [0m[1mbold[0m in cell[2m  │  [0m[38;5;213m[48;5;236m code [0m
-
-<IMG>
-
-If every section above renders with rich formatting, termdown has full coverage
-of the
-audited feature set.
+If every section above renders with at least [3msome[23m graceful fallback,
+termdown is degrading correctly on out-of-scope syntax.

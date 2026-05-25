@@ -1,0 +1,303 @@
+[2m────────────────────────────────────────────────────────────[0m
+
+<IMG>
+
+<IMG>
+
+This fixture is the [1msingle source of truth[0m for syntax termdown currently
+supports
+or has explicitly committed to supporting (see [38;5;213m[48;5;236m TODO.md [0m). When you add or
+change a
+renderer feature, you should expect to update the snapshot of [3mthis[23m file.
+
+The YAML frontmatter above is part of the "markdown metadata" roadmap feature.
+It
+currently leaks into the rendered output and should one day be hidden.
+
+<IMG>
+
+This section exercises all six heading levels, depth nesting, repeated titles,
+and
+long-title wrapping — covering both the heading rasterizer and the TUI
+table-of-contents
+panel.
+
+<IMG>
+
+<IMG>
+
+<IMG>
+
+<IMG>
+
+[1mH4 — 四级标题[0m
+
+[1mH5 — 五级标题[0m
+
+[1mH6 — 六级标题 (the deepest level Markdown supports)[0m
+
+<IMG>
+
+<IMG>
+
+<IMG>
+
+<IMG>
+
+<IMG>
+
+[1mDuplicate[0m
+
+[1mDuplicate[0m
+
+<IMG>
+
+Filler paragraph so the long heading above is followed by some body content.
+
+<IMG>
+
+[3mItalic via underscores[23m, [3mitalic via asterisks[23m.
+
+[1mBold via double asterisks[0m, [1mbold via double underscores[0m.
+
+[3mYou [23m[1m[3mcan[0m[3m combine them[23m, and [1mbold [0m[1m[3mwith[0m[1m nested italic[0m is fine too.
+
+[9mStrikethrough[29m via GFM tilde syntax.
+
+[3m斜体[23m · [1m粗体[0m · [1m[3m粗斜体组合[0m · [9m中文删除线[29m
+
+<IMG>
+
+<IMG>
+
+  • Item 1
+  • Item 2
+    • Item 2a
+    • Item 2b
+      • Item 2b.i
+      • Item 2b.ii
+  • Item 3
+
+<IMG>
+
+  1. Step one
+  2. Step two
+    1. Sub-step 2.1
+    2. Sub-step 2.2
+  3. Step three
+
+<IMG>
+
+  • 第一项 (item 1)
+  • 第二项 (item 2)
+    • 嵌套 a / nested a
+    • 嵌套 b / nested b
+
+<IMG>
+
+<IMG>
+
+  [✓] Setup project structure
+  [✓] Add markdown parser
+  [ ] Implement task list rendering
+  [ ] Add configuration options
+  [ ] Write documentation
+
+<IMG>
+
+  [✓] Phase 1
+    [✓] Design architecture
+    [✓] Write prototype
+    [ ] Code review
+  [ ] Phase 2
+    [ ] Performance optimization
+    [ ] Integration testing
+
+<IMG>
+
+  1. Ordered item one
+  2. Ordered item two
+
+  [✓] Completed task
+  [ ] Pending task
+  • Regular list item (no checkbox)
+  [✓] Another done item
+  [✓] [9mCompleted and struck through[29m
+  [ ] Task with [1mbold[0m and [3mitalic[23m text
+  [ ] Task with [38;5;213m[48;5;236m inline code [0m
+
+<IMG>
+
+Inline link: [36m[4mMarkdown Live Preview[24m[0m [38;5;245m(https://markdownlivepreview.com/)[0m.
+
+Link with title: [36m[4mtermdown source[24m[0m [38;5;245m(https://github.com/rrbe/termdown)[0m.
+
+Reference-style link: [36m[4mreference example[24m[0m [38;5;245m(https://example.com/ref)[0m.
+
+Bare URL (GFM autolink): https://example.com/docs/readme.html — bare email:
+support@example.com — these are part of the autolink roadmap.
+
+<IMG>
+
+[38;5;240m│  [3;38;5;250mRoadmap feature — [38;5;213m[48;5;236m TODO.md [0m 中"图片支持"。当前 termdown[0m
+[38;5;240m│  [3;38;5;250m渲染图片的能力还不完整，本节[0m
+[38;5;240m│  [3;38;5;250m既是覆盖目标也是回归 fixture。[0m
+
+Local image (does not exist on disk — exercises the broken-path branch):
+
+[2m[🖼 local image alt](./fixtures/nonexistent.png)[0m
+
+Local image with relative path that [3mdoes[23m exist (fixtures/links/sub/b.md as a
+placeholder target — termdown should warn or skip gracefully):
+
+[2m[🖼 relative target](./links/sub/b.md)[0m
+
+Remote image (no network in tests — exercises the remote-skip branch):
+
+[2m[🖼 remote image](https://example.com/banner.png)[0m
+
+Reference-style image:
+
+[2m[🖼 ref image](https://example.com/banner.png)[0m
+
+<IMG>
+
+[38;5;240m│  [3;38;5;250mMarkdown is a lightweight markup language with plain-text-formatting syntax,[0m
+[38;5;240m│  [3;38;5;250mcreated in 2004 by John Gruber with Aaron Swartz.[0m
+[38;5;240m│  [38;5;240m│  [3;38;5;250mNested quote: Markdown is often used to format readme files and to create[0m
+[38;5;240m│  [38;5;240m│  [3;38;5;250mrich[0m
+[38;5;240m│  [38;5;240m│  [3;38;5;250mtext using a plain text editor.[0m
+
+[38;5;240m│  [3;38;5;250m中文引用块：Markdown 是一种轻量级标记语言，使用纯文本格式语法。[0m
+[38;5;240m│  [38;5;240m│  [3;38;5;250m嵌套引用：常用于编写 readme 文件与在线论坛中的消息格式化。[0m
+
+<IMG>
+
+<IMG>
+
+[1mLeft[0m             [2m  │  [0m[1mCenter[0m      [2m  │  [0m[1mRight[0m 
+[2m─────────────────[0m[2m  ┼  [0m[2m────────────[0m[2m  ┼  [0m[2m──────[0m
+a                [2m  │  [0mb           [2m  │  [0mc     
+long left content[2m  │  [0mcenter      [2m  │  [0m1     
+x                [2m  │  [0m[1mbold[0m in cell[2m  │  [0m[38;5;213m[48;5;236m code [0m
+
+<IMG>
+
+[1mCase[0m              [2m  │  [0m[1mExample[0m            
+[2m──────────────────[0m[2m  ┼  [0m[2m───────────────────[0m
+Single emoji      [2m  │  [0m😀                 
+Mixed text        [2m  │  [0m修正版 ✨ version 2
+Symbol-like       [2m  │  [0m✅ ⚠ ❌            
+Variation selector[2m  │  [0m☀️ ❤️ ⭐️             
+
+<IMG>
+
+Fenced block with language tag:
+
+[48;5;236m[38;5;213m fn main() {                            [0m
+[48;5;236m[38;5;213m     let greeting = "Hello, termdown!"; [0m
+[48;5;236m[38;5;213m     println!("{}", greeting);          [0m
+[48;5;236m[38;5;213m }                                      [0m
+
+Fenced block, no language tag:
+
+[48;5;236m[38;5;213m let message = 'Hello world'; [0m
+[48;5;236m[38;5;213m alert(message);              [0m
+
+Indented code block:
+
+[48;5;236m[38;5;213m fn indented() {          [0m
+[48;5;236m[38;5;213m     // four-space indent [0m
+[48;5;236m[38;5;213m }                        [0m
+
+Inline code: this web site is using [38;5;213m[48;5;236m markedjs/marked [0m, and shell command
+[38;5;213m[48;5;236m cargo run -- fixtures/supported-syntax.md [0m should render this file.
+
+<IMG>
+
+[38;5;240m│  [3;38;5;250mRoadmap feature — [38;5;213m[48;5;236m TODO.md [0m 中"测试 html 标签支持"。覆盖块级 HTML、行内[0m
+[38;5;240m│  [3;38;5;250mHTML、HTML 注释。[0m
+
+A raw block HTML element:
+
+[2m<div style="padding: 8px; border: 1px solid #ccc;">[0m
+[2m  <strong>Hello</strong> from inline HTML.[0m
+[2m</div>[0m
+
+Inline HTML in a paragraph: this word is [4munderlined via HTML[24m, this one is
+[1mbold via HTML[0m, and this one is red via HTML.
+An inline 
+ break and an HTML
+abbreviation.
+
+An HTML comment:  end of line.
+
+Self-closing void element: line one
+line two on the same paragraph.
+
+<IMG>
+
+[38;5;240m│  [3;38;5;250mRoadmap feature — [38;5;213m[48;5;236m TODO.md [0m[0m
+[38;5;240m│  [3;38;5;250m中"长文本换行时缩进的处理"。本节专门用于验证：长行换行后[0m
+[38;5;240m│  [3;38;5;250m续行的缩进是否与首行对齐（特别是在列表、引用、标题里）。[0m
+
+<IMG>
+
+This is a deliberately long English paragraph that should wrap multiple times
+in a narrow terminal so we can verify that continuation lines start flush with
+the left margin and do not get an accidental indent.
+这是一段足够长的中文段落，用来验证终端窗口较窄时，软换行产生的续行应该与首行左对齐而不应该出现额外缩进，特别是混排了
+emoji 🚀 与英文 ASCII 之后宽度计算仍然正确。
+
+<IMG>
+
+  • 顶级列表项 / Top-level list item
+    •
+第二层项目，这一项里写一段非常长的中英混排正文，用来验证在嵌套列表内部软换行后续行是否能够正确缩进到列表项内容的起始列，而不是退到列表标记本身的位置
+— this nested item should wrap with its continuation lines aligned to the start
+of the item text, not to the bullet marker.
+
+<IMG>
+
+[38;5;240m│  [3;38;5;250m引用块里的长行也需要正确换行：这是一段被包在 [38;5;213m[48;5;236m > [0m[0m
+[38;5;240m│  [3;38;5;250m引用标记里的中英混排长文，软换行[0m
+[38;5;240m│  [3;38;5;250m后的续行需要与首行同一列对齐，而不应该跑到引用块外面去。And the same[0m
+[38;5;240m│  [3;38;5;250mexpectation in[0m
+[38;5;240m│  [3;38;5;250mEnglish — wrapped continuation lines must remain inside the blockquote prefix[0m
+[38;5;240m│  [3;38;5;250mrather than escape to the outer margin.[0m
+
+<IMG>
+
+[1m一个超长四级标题，包含中文、English、还有 emoji 🚀，用来验证标题在窄终端中换行后续行的缩进表现[0m
+
+After the long heading above, this short paragraph anchors the test so the
+heading is followed by body content.
+
+<IMG>
+
+<IMG>
+
+  • 单个 emoji: 😀 😎 ✨ 🚀
+  • 中英混排: Hello 世界 🌍
+  • 符号混排: ✅ Done · ⚠ Warning · ❌ Failed
+  • 常见 emoji 变体: ☀️ ❤️ ⭐️
+
+<IMG>
+
+观察复杂 ZWJ emoji 的边界表现：👨‍👩‍👧‍👦 👩🏽‍💻 🧑‍🚀
+
+<IMG>
+
+正文仍然由终端自身字体渲染，所以这里主要用来对比标题图片化与正文文本化的表现差异。
+Body text mixes 中文、English、ASCII punctuation, and emoji 🌍 within the same
+line.
+
+[38;5;240m│  [3;38;5;250m引用块里也放几个字符：💡 🛠 📦[0m
+
+<IMG>
+
+如果以上每一节都能正确（或按当前能力部分正确）渲染，termdown
+的核心语法覆盖就达标了。
+The snapshot baseline freezes what's "current" — when a roadmap feature lands,
+the
+snapshot will diff and the new baseline records the improvement.
