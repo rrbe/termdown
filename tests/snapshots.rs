@@ -67,3 +67,19 @@ fn snapshot_supported_syntax() {
 fn snapshot_unsupported_syntax() {
     check_snapshot("unsupported-syntax");
 }
+#[test]
+fn snapshot_metadata_yaml() {
+    check_snapshot("specialized/metadata-yaml");
+}
+#[test]
+fn snapshot_metadata_toml() {
+    check_snapshot("specialized/metadata-toml");
+}
+#[test]
+fn snapshot_metadata_malformed() {
+    check_snapshot("specialized/metadata-malformed");
+}
+#[test]
+fn snapshot_metadata_none() {
+    check_snapshot("specialized/metadata-none");
+}

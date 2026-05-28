@@ -108,6 +108,7 @@ mod tests {
                 .collect(),
             headings: vec![],
             images: vec![],
+            metadata: None,
         }
     }
 

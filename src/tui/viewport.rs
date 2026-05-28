@@ -16,6 +16,22 @@ pub struct VisualLine {
     /// heading image's cell footprint matches the viewport's row count.
     /// These rows render as blank and do not carry image placements.
     pub is_spacer: bool,
+    /// Set on rows that visualize the document's frontmatter metadata block.
+    /// `logical_index` is meaningless for these rows — `draw()` consults
+    /// `doc.metadata` instead. See `docs/adr/0001-metadata-block-handling.md`.
+    pub metadata_row: Option<MetadataVisualRow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataVisualRow {
+    /// Single dim line when collapsed.
+    Folded,
+    /// Top border of the expanded box.
+    ExpandedTop,
+    /// `usize` is the index into `MetadataInfo.pairs` (or 0 when falling back).
+    ExpandedField(usize),
+    /// Bottom border of the expanded box.
+    ExpandedBottom,
 }
 
 pub struct Viewport {
@@ -24,6 +40,8 @@ pub struct Viewport {
     pub width: u16,
     visual_lines: Vec<VisualLine>,
     cache_width: u16,
+    cache_metadata_expanded: bool,
+    cache_metadata_shown: bool,
 }
 
 impl Viewport {
@@ -34,16 +52,33 @@ impl Viewport {
             width,
             visual_lines: Vec::new(),
             cache_width: 0,
+            cache_metadata_expanded: false,
+            cache_metadata_shown: false,
         }
     }
 
-    /// (Re)compute the wrap cache if the width has changed since the last call.
-    pub fn ensure_wrap(&mut self, doc: &RenderedDoc) {
-        if self.cache_width == self.width && !self.visual_lines.is_empty() {
+    /// (Re)compute the wrap cache if width, metadata visibility, or fold state
+    /// have changed since the last call. `show_metadata` and `expanded` come
+    /// from `Config.metadata.show` and `DocEntry.metadata_expanded` respectively.
+    pub fn ensure_wrap(&mut self, doc: &RenderedDoc, show_metadata: bool, expanded: bool) {
+        if self.cache_width == self.width
+            && self.cache_metadata_expanded == expanded
+            && self.cache_metadata_shown == show_metadata
+            && !self.visual_lines.is_empty()
+        {
             return;
         }
-        self.visual_lines = wrap_all(&doc.lines, self.width);
+        let mut lines = Vec::new();
+        if show_metadata {
+            if let Some(meta) = &doc.metadata {
+                lines.extend(metadata_visual_lines(meta, expanded));
+            }
+        }
+        lines.extend(wrap_all(&doc.lines, self.width));
+        self.visual_lines = lines;
         self.cache_width = self.width;
+        self.cache_metadata_expanded = expanded;
+        self.cache_metadata_shown = show_metadata;
         if self.visual_lines.is_empty() {
             self.top = 0;
             return;
@@ -52,6 +87,13 @@ impl Viewport {
         if self.top > max_top {
             self.top = max_top;
         }
+    }
+
+    /// Drop the wrap cache so the next `ensure_wrap` rebuilds it. Used when
+    /// state outside `width` changes (e.g. metadata fold toggle).
+    pub fn invalidate_wrap(&mut self) {
+        self.visual_lines.clear();
+        self.cache_width = 0;
     }
 
     /// Move `top` by `delta` visual lines, clamped to [0, max_top].
@@ -123,6 +165,55 @@ impl Viewport {
     }
 }
 
+/// Build the VisualLines that visualize a document's frontmatter at the top
+/// of the viewport. One row when folded, top-border + N-field + bottom-border
+/// when expanded. When the heuristic produced no pairs, expanded still emits
+/// a single field row carrying the fallback string.
+fn metadata_visual_lines(
+    meta: &crate::frontmatter::MetadataInfo,
+    expanded: bool,
+) -> Vec<VisualLine> {
+    if !expanded {
+        return vec![VisualLine {
+            logical_index: 0,
+            byte_start: 0,
+            byte_end: 0,
+            is_spacer: false,
+            metadata_row: Some(MetadataVisualRow::Folded),
+        }];
+    }
+    let row_count = if meta.has_pairs() {
+        meta.pairs.len()
+    } else {
+        1
+    };
+    let mut out = Vec::with_capacity(row_count + 2);
+    out.push(VisualLine {
+        logical_index: 0,
+        byte_start: 0,
+        byte_end: 0,
+        is_spacer: false,
+        metadata_row: Some(MetadataVisualRow::ExpandedTop),
+    });
+    for i in 0..row_count {
+        out.push(VisualLine {
+            logical_index: 0,
+            byte_start: 0,
+            byte_end: 0,
+            is_spacer: false,
+            metadata_row: Some(MetadataVisualRow::ExpandedField(i)),
+        });
+    }
+    out.push(VisualLine {
+        logical_index: 0,
+        byte_start: 0,
+        byte_end: 0,
+        is_spacer: false,
+        metadata_row: Some(MetadataVisualRow::ExpandedBottom),
+    });
+    out
+}
+
 fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
     use crate::layout::LineKind;
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -144,6 +235,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 byte_start: 0,
                 byte_end: end,
                 is_spacer: false,
+                metadata_row: None,
             });
             for _ in 1..rows {
                 out.push(VisualLine {
@@ -151,6 +243,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                     byte_start: 0,
                     byte_end: 0,
                     is_spacer: true,
+                    metadata_row: None,
                 });
             }
             continue;
@@ -162,6 +255,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                     byte_start: 0,
                     byte_end: line_byte_len(line),
                     is_spacer: false,
+                    metadata_row: None,
                 });
                 continue;
             }
@@ -187,6 +281,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 byte_start: 0,
                 byte_end: text.len(),
                 is_spacer: false,
+                metadata_row: None,
             });
             continue;
         }
@@ -205,6 +300,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                     byte_start,
                     byte_end: cur_byte,
                     is_spacer: false,
+                    metadata_row: None,
                 });
                 byte_start = cur_byte;
                 cur_width = 0;
@@ -219,6 +315,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 byte_start,
                 byte_end: text.len(),
                 is_spacer: false,
+                metadata_row: None,
             });
         } else if text.is_empty() {
             // Empty logical line (e.g. a `Body` with no content) — emit one empty visual.
@@ -227,6 +324,7 @@ fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
                 byte_start: 0,
                 byte_end: 0,
                 is_spacer: false,
+                metadata_row: None,
             });
         }
     }
@@ -276,6 +374,7 @@ mod tests {
             lines,
             headings: vec![],
             images: vec![],
+            metadata: None,
         }
     }
 
@@ -283,7 +382,7 @@ mod tests {
     fn scroll_respects_bounds() {
         let doc = make_doc(10);
         let mut vp = Viewport::new(4, 40);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
 
         assert_eq!(vp.top, 0);
         vp.scroll_by(-3);
@@ -301,7 +400,7 @@ mod tests {
     fn empty_doc_visible_is_empty() {
         let doc = make_doc(0);
         let mut vp = Viewport::new(4, 40);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         assert!(vp.visible().is_empty());
         assert_eq!(vp.total_visual_lines(), 0);
     }
@@ -310,7 +409,7 @@ mod tests {
     fn height_exceeds_total_shows_all() {
         let doc = make_doc(3);
         let mut vp = Viewport::new(10, 40);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         assert_eq!(vp.visible().len(), 3);
         // max_top = total - height = 3 - 10 = 0 (saturating)
         vp.scroll_by(100);
@@ -346,9 +445,10 @@ mod tests {
             lines,
             headings,
             images: vec![],
+            metadata: None,
         };
         let mut vp = Viewport::new(3, 40);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
 
         vp.jump_to_next_heading(&doc, 0);
         assert_eq!(vp.top, 3);
@@ -381,9 +481,10 @@ mod tests {
             lines,
             headings,
             images: vec![],
+            metadata: None,
         };
         let mut vp = Viewport::new(3, 40);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         vp.top = 3;
 
         // No heading after visual line 3 — expect top unchanged.
@@ -409,9 +510,10 @@ mod tests {
             }],
             headings: vec![],
             images: vec![],
+            metadata: None,
         };
         let mut vp = Viewport::new(10, 20);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         assert!(
             vp.total_visual_lines() > 1,
             "expected multiple visual lines"
@@ -431,9 +533,10 @@ mod tests {
             }],
             headings: vec![],
             images: vec![],
+            metadata: None,
         };
         let mut vp = Viewport::new(10, 20);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         assert_eq!(vp.total_visual_lines(), 1, "table lines should not wrap");
     }
 
@@ -452,9 +555,10 @@ mod tests {
             }],
             headings: vec![],
             images: vec![],
+            metadata: None,
         };
         let mut vp = Viewport::new(10, 20);
-        vp.ensure_wrap(&doc);
+        vp.ensure_wrap(&doc, false, false);
         // With max width 20 cols, 24 cols should split into 2 visual lines.
         assert!(
             vp.total_visual_lines() >= 2,

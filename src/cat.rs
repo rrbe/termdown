@@ -3,6 +3,8 @@
 
 use std::io::{BufWriter, Write};
 
+use crate::config::Config;
+use crate::frontmatter::{self, MetadataInfo};
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
 use crate::render;
 use crate::style::{
@@ -10,9 +12,16 @@ use crate::style::{
     STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
 };
 
-pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors) {
+pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Config) {
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
+
+    if config.metadata.show {
+        if let Some(meta) = &doc.metadata {
+            write_metadata_oneline(&mut out, meta, term_width);
+            let _ = writeln!(&mut out);
+        }
+    }
 
     let mut i = 0;
     while i < doc.lines.len() {
@@ -85,6 +94,38 @@ fn write_line<W: Write>(
             let _ = writeln!(out, "{rendered}");
         }
     }
+}
+
+/// Render the folded one-line metadata summary used by both cat and the TUI's
+/// collapsed state: `· metadata · k=v, k=v, …`, dimmed, truncated to fit.
+pub fn write_metadata_oneline<W: Write>(out: &mut W, meta: &MetadataInfo, term_width: usize) {
+    let prefix = "· metadata · ";
+    let body = frontmatter::format_pairs_inline(meta);
+    let body = truncate_to_width(&body, term_width.saturating_sub(display_width(prefix)));
+    let _ = writeln!(out, "{DIM_ON}{prefix}{body}{RESET}");
+}
+
+fn truncate_to_width(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
+    }
+    if display_width(s) <= max_cols {
+        return s.to_string();
+    }
+    let ellipsis = "…";
+    let budget = max_cols.saturating_sub(display_width(ellipsis));
+    let mut acc = String::new();
+    let mut width = 0;
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > budget {
+            break;
+        }
+        acc.push(ch);
+        width += cw;
+    }
+    acc.push_str(ellipsis);
+    acc
 }
 
 /// Emit a consecutive run of `LineKind::CodeBlock` lines, padding each to the

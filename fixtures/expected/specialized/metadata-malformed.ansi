@@ -1,0 +1,6 @@
+[2m· metadata · description=>, key1=value1, key2=value2, title=Malformed Sample[0m
+
+Body. The frontmatter above mixes a folded scalar and a nested mapping —
+shapes that the line-based heuristic cannot fully parse. It should still
+extract [38;5;213m[48;5;236m description [0m and [38;5;213m[48;5;236m title [0m while skipping the continuation lines,
+and the document should not break.

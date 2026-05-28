@@ -1,0 +1,11 @@
+<IMG>
+
+This file has no YAML or TOML metadata block. The [38;5;213m[48;5;236m --- [0m line further down
+should be rendered as a normal horizontal rule, [1mnot[0m as the opening
+fence of a frontmatter block.
+
+Some body text before the rule.
+
+[2m────────────────────────────────────────────────────────────[0m
+
+Some body text after the rule.

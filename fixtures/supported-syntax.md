@@ -11,8 +11,9 @@ This fixture is the **single source of truth** for syntax termdown currently sup
 or has explicitly committed to supporting (see `TODO.md`). When you add or change a
 renderer feature, you should expect to update the snapshot of *this* file.
 
-The YAML frontmatter above is part of the "markdown metadata" roadmap feature. It
-currently leaks into the rendered output and should one day be hidden.
+The YAML frontmatter above is parsed and rendered as a single dim summary line
+in `--cat`, or as a collapsible inline box in TUI (toggle with `m`). It does
+not leak into body content.
 
 ## 1. Headings
 
