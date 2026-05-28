@@ -1,4 +1,4 @@
-[2m· metadata · description=>, key1=value1, key2=value2, title=Malformed Sample[0m
+[2m[metadata · description=>, key1=value1, key2=value2, title=Malformed Sample][0m
 
 Body. The frontmatter above mixes a folded scalar and a nested mapping —
 shapes that the line-based heuristic cannot fully parse. It should still

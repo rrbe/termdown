@@ -173,43 +173,55 @@ fn metadata_visual_lines(
     meta: &crate::frontmatter::MetadataInfo,
     expanded: bool,
 ) -> Vec<VisualLine> {
+    let mut out = Vec::new();
     if !expanded {
-        return vec![VisualLine {
-            logical_index: 0,
-            byte_start: 0,
-            byte_end: 0,
-            is_spacer: false,
-            metadata_row: Some(MetadataVisualRow::Folded),
-        }];
-    }
-    let row_count = if meta.has_pairs() {
-        meta.pairs.len()
-    } else {
-        1
-    };
-    let mut out = Vec::with_capacity(row_count + 2);
-    out.push(VisualLine {
-        logical_index: 0,
-        byte_start: 0,
-        byte_end: 0,
-        is_spacer: false,
-        metadata_row: Some(MetadataVisualRow::ExpandedTop),
-    });
-    for i in 0..row_count {
         out.push(VisualLine {
             logical_index: 0,
             byte_start: 0,
             byte_end: 0,
             is_spacer: false,
-            metadata_row: Some(MetadataVisualRow::ExpandedField(i)),
+            metadata_row: Some(MetadataVisualRow::Folded),
+        });
+    } else {
+        let row_count = if meta.has_pairs() {
+            meta.pairs.len()
+        } else {
+            1
+        };
+        out.reserve(row_count + 2);
+        out.push(VisualLine {
+            logical_index: 0,
+            byte_start: 0,
+            byte_end: 0,
+            is_spacer: false,
+            metadata_row: Some(MetadataVisualRow::ExpandedTop),
+        });
+        for i in 0..row_count {
+            out.push(VisualLine {
+                logical_index: 0,
+                byte_start: 0,
+                byte_end: 0,
+                is_spacer: false,
+                metadata_row: Some(MetadataVisualRow::ExpandedField(i)),
+            });
+        }
+        out.push(VisualLine {
+            logical_index: 0,
+            byte_start: 0,
+            byte_end: 0,
+            is_spacer: false,
+            metadata_row: Some(MetadataVisualRow::ExpandedBottom),
         });
     }
+    // Trailing blank row: separate the metadata block from whatever heading
+    // or paragraph follows. Rendered as empty via the existing `is_spacer`
+    // branch in `draw()`.
     out.push(VisualLine {
         logical_index: 0,
         byte_start: 0,
         byte_end: 0,
-        is_spacer: false,
-        metadata_row: Some(MetadataVisualRow::ExpandedBottom),
+        is_spacer: true,
+        metadata_row: None,
     });
     out
 }

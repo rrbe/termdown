@@ -97,23 +97,28 @@ fn write_line<W: Write>(
 }
 
 /// Render the folded one-line metadata summary used by both cat and the TUI's
-/// collapsed state: `· metadata · k=v, k=v, …`, dimmed, truncated to fit.
+/// collapsed state: `[metadata · k=v, k=v, …]`, dimmed, truncated to fit
+/// while preserving the closing `]`.
 pub fn write_metadata_oneline<W: Write>(out: &mut W, meta: &MetadataInfo, term_width: usize) {
-    let prefix = "· metadata · ";
     let body = frontmatter::format_pairs_inline(meta);
-    let body = truncate_to_width(&body, term_width.saturating_sub(display_width(prefix)));
-    let _ = writeln!(out, "{DIM_ON}{prefix}{body}{RESET}");
+    let full = format!("[metadata · {body}]");
+    let text = truncate_keep_suffix(&full, term_width, "]");
+    let _ = writeln!(out, "{DIM_ON}{text}{RESET}");
 }
 
-fn truncate_to_width(s: &str, max_cols: usize) -> String {
+/// Truncate `s` to fit in `max_cols`, appending `…` and preserving the
+/// literal `suffix` (e.g. `"]"`) at the end when truncation is needed.
+/// When `s` already fits, returned as-is.
+fn truncate_keep_suffix(s: &str, max_cols: usize, suffix: &str) -> String {
     if max_cols == 0 {
         return String::new();
     }
     if display_width(s) <= max_cols {
         return s.to_string();
     }
+    let suffix_w = display_width(suffix);
     let ellipsis = "…";
-    let budget = max_cols.saturating_sub(display_width(ellipsis));
+    let budget = max_cols.saturating_sub(display_width(ellipsis) + suffix_w);
     let mut acc = String::new();
     let mut width = 0;
     for ch in s.chars() {
@@ -125,6 +130,7 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
         width += cw;
     }
     acc.push_str(ellipsis);
+    acc.push_str(suffix);
     acc
 }
 

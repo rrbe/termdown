@@ -767,9 +767,9 @@ fn render_metadata_row(
 
     match role {
         viewport::MetadataVisualRow::Folded => {
-            let prefix = "· metadata · ";
             let body = crate::frontmatter::format_pairs_inline(meta);
-            let text = truncate_to_cols(&format!("{prefix}{body}"), body_cols);
+            let full = format!("[metadata · {body}]");
+            let text = truncate_to_cols_keep_suffix(&full, body_cols, "]");
             RLine::from(RSpan::styled(text, dim))
         }
         viewport::MetadataVisualRow::ExpandedTop => {
@@ -842,6 +842,32 @@ fn truncate_to_cols(s: &str, max_cols: usize) -> String {
         acc.push(ch);
         width += cw;
     }
+    acc
+}
+
+/// Like `truncate_to_cols` but, when truncation happens, preserves a literal
+/// `suffix` at the very end. Used to keep the closing `]` on the folded
+/// metadata chip visible after the ellipsis.
+fn truncate_to_cols_keep_suffix(s: &str, max_cols: usize, suffix: &str) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if UnicodeWidthStr::width(s) <= max_cols {
+        return s.to_string();
+    }
+    let suffix_w = UnicodeWidthStr::width(suffix);
+    // Reserve 1 col for `…` + `suffix_w` for the kept tail.
+    let budget = max_cols.saturating_sub(suffix_w + 1);
+    let mut width = 0;
+    let mut acc = String::new();
+    for ch in s.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > budget {
+            break;
+        }
+        acc.push(ch);
+        width += cw;
+    }
+    acc.push('…');
+    acc.push_str(suffix);
     acc
 }
 

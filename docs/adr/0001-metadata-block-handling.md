@@ -29,9 +29,10 @@ as body content and not as completely invisible noise:
    `ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS` on the pulldown-cmark parser.
    Capture the raw block text via the `MetadataBlock` event pair.
 2. **One-line summary**: A heuristic parser splits the raw block into
-   `key=value, …` pairs, joined into a single dim line prefixed with
-   `· metadata · `, truncated to terminal width with `…`. No real YAML/TOML
-   parser is introduced.
+   `key=value, …` pairs, joined into a single dim line wrapped as
+   `[metadata · key=value, …]`, truncated to terminal width — the closing
+   `]` is preserved after the truncation ellipsis. No real YAML/TOML parser
+   is introduced.
 3. **Fallback**: If the heuristic extracts zero valid key/value pairs, fall
    back to a raw single-line join of the block content (so something useful is
    still shown for malformed or exotic input).

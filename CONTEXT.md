@@ -22,8 +22,10 @@ pulldown-cmark event name.
 
 ### Metadata one-line summary
 The single dim line termdown renders in place of a parsed frontmatter block.
-Format: `· metadata · key=value, key=value, …` truncated to terminal width with
-`…`. Identical in both `--cat` and TUI **folded** state.
+Format: `[metadata · key=value, key=value, …]` — wrapped in square brackets,
+truncated to terminal width with the closing `]` preserved after the ellipsis.
+Identical in both `--cat` and TUI **folded** state. Followed by one blank row
+for visual separation from the body.
 
 ### Folded / Expanded (TUI metadata)
 The two display states for a metadata block in TUI mode:
