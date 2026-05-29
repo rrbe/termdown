@@ -398,8 +398,11 @@ fn legacy_config_location_triggers_migration_warning() {
         stderr.contains("ignoring legacy config"),
         "expected a migration warning, stderr was: {stderr:?}"
     );
+    // Match the legacy dir name only (not a `/`-joined path) so the assertion
+    // holds on Windows, where `Path::display` uses `\` separators. The new
+    // path is `.config<sep>termdown`, which never contains `.termdown`.
     assert!(
-        stderr.contains(".termdown/config.toml"),
+        stderr.contains(".termdown"),
         "warning should name the legacy path, stderr was: {stderr:?}"
     );
 }
