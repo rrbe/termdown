@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Markdown frontmatter support.** YAML (`---`) and TOML (`+++`) metadata
+  blocks at the top of a document are now parsed and never leak into body
+  content. `--cat` renders a dim one-line summary
+  (`[metadata · key=value, …]`); TUI shows the same line and can expand it
+  to an inline key/value box with the new `m` key. A blank row follows the
+  summary for visual separation. Opt out entirely via `[metadata] show = false`
+  in `~/.termdown/config.toml`. See `docs/adr/0001-metadata-block-handling.md`.
+
 ## [0.5.1] - 2026-05-26
 
 ### Added

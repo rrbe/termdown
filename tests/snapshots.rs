@@ -49,7 +49,8 @@ fn check_snapshot(fixture: &str) {
     let expected = fs::read_to_string(&expected_path).expect("expected file");
     let actual = render(&md);
     if actual != expected {
-        let tmp = std::env::temp_dir().join(format!("termdown-snapshot-{fixture}.ansi"));
+        let safe = fixture.replace('/', "-");
+        let tmp = std::env::temp_dir().join(format!("termdown-snapshot-{safe}.ansi"));
         fs::write(&tmp, &actual).expect("failed to write snapshot diff to temp file");
         panic!(
             "snapshot mismatch for {fixture}\n  expected: {}\n  actual written to: {}",
@@ -66,4 +67,20 @@ fn snapshot_supported_syntax() {
 #[test]
 fn snapshot_unsupported_syntax() {
     check_snapshot("unsupported-syntax");
+}
+#[test]
+fn snapshot_metadata_yaml() {
+    check_snapshot("specialized/metadata-yaml");
+}
+#[test]
+fn snapshot_metadata_toml() {
+    check_snapshot("specialized/metadata-toml");
+}
+#[test]
+fn snapshot_metadata_malformed() {
+    check_snapshot("specialized/metadata-malformed");
+}
+#[test]
+fn snapshot_metadata_none() {
+    check_snapshot("specialized/metadata-none");
 }

@@ -3,6 +3,8 @@
 
 use std::io::{BufWriter, Write};
 
+use crate::config::Config;
+use crate::frontmatter::{self, MetadataInfo};
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
 use crate::render;
 use crate::style::{
@@ -10,9 +12,16 @@ use crate::style::{
     STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
 };
 
-pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors) {
+pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Config) {
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
+
+    if config.metadata.show {
+        if let Some(meta) = &doc.metadata {
+            write_metadata_oneline(&mut out, meta, term_width);
+            let _ = writeln!(&mut out);
+        }
+    }
 
     let mut i = 0;
     while i < doc.lines.len() {
@@ -85,6 +94,14 @@ fn write_line<W: Write>(
             let _ = writeln!(out, "{rendered}");
         }
     }
+}
+
+/// Render the folded one-line metadata summary used by both cat and the TUI's
+/// collapsed state: `[metadata · k=v, k=v, …]`, dimmed, truncated to fit
+/// while preserving the closing `]`.
+pub fn write_metadata_oneline<W: Write>(out: &mut W, meta: &MetadataInfo, term_width: usize) {
+    let text = frontmatter::folded_summary(meta, term_width);
+    let _ = writeln!(out, "{DIM_ON}{text}{RESET}");
 }
 
 /// Emit a consecutive run of `LineKind::CodeBlock` lines, padding each to the

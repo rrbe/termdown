@@ -16,6 +16,32 @@ pub struct Config {
     /// e.g. Ghostty's `bell-features`. `None` means default (on). CLI
     /// `--no-bell` overrides to `Some(false)`.
     pub bell: Option<bool>,
+
+    #[serde(default)]
+    pub metadata: MetadataSection,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct MetadataSection {
+    /// Whether to render frontmatter (YAML `---` / TOML `+++` metadata blocks).
+    /// `true` (default) shows the one-line summary in cat / TUI-folded, and
+    /// allows the TUI `m` key to expand. `false` hides metadata entirely;
+    /// parsing still runs so the block never leaks into body content.
+    /// See `docs/adr/0001-metadata-block-handling.md`.
+    #[serde(default = "default_metadata_show")]
+    pub show: bool,
+}
+
+fn default_metadata_show() -> bool {
+    true
+}
+
+impl Default for MetadataSection {
+    fn default() -> Self {
+        Self {
+            show: default_metadata_show(),
+        }
+    }
 }
 
 #[derive(Deserialize, Default, Clone)]

@@ -23,6 +23,7 @@ pub enum Action {
     Back,
     Forward,
     OpenHelp,
+    ToggleMetadata,
     None,
 }
 
@@ -63,6 +64,8 @@ pub fn map_normal(key: KeyEvent) -> Action {
         KeyCode::Enter => Action::OpenLink,
         KeyCode::Char('o') => Action::Back,
         KeyCode::Char('i') => Action::Forward,
+
+        KeyCode::Char('m') => Action::ToggleMetadata,
 
         _ => Action::None,
     }

@@ -1,6 +1,4 @@
-[2m────────────────────────────────────────────────────────────[0m
-
-<IMG>
+[2m[metadata · title=Supported Syntax Showcase, author=termdown, tags=[markdown, …][0m
 
 <IMG>
 
@@ -10,9 +8,9 @@ or has explicitly committed to supporting (see [38;5;213m[48;5;236m TODO.md [
 change a
 renderer feature, you should expect to update the snapshot of [3mthis[23m file.
 
-The YAML frontmatter above is part of the "markdown metadata" roadmap feature.
-It
-currently leaks into the rendered output and should one day be hidden.
+The YAML frontmatter above is parsed and rendered as a single dim summary line
+in [38;5;213m[48;5;236m --cat [0m, or as a collapsible inline box in TUI (toggle with [38;5;213m[48;5;236m m [0m). It does
+not leak into body content.
 
 <IMG>
 

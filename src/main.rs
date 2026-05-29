@@ -1,6 +1,7 @@
 mod cat;
 mod config;
 mod font;
+mod frontmatter;
 mod layout;
 mod render;
 mod style;
@@ -123,7 +124,7 @@ fn main() {
     let saved_termios = needs_echo_suppression().then(disable_echo);
 
     let doc = layout::build(&md, &config, theme);
-    cat::print(&doc, term_width, &colors);
+    cat::print(&doc, term_width, &colors, &config);
 
     #[cfg(unix)]
     {

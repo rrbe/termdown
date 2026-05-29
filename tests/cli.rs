@@ -91,12 +91,21 @@ struct TempMarkdownFile {
 
 impl TempMarkdownFile {
     fn new(contents: &str) -> Self {
+        // `nanos()` alone can collide between two parallel test threads on
+        // platforms with coarse-grained clock resolution; a monotonic counter
+        // on top guarantees uniqueness within the process.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time should move forward")
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("termdown-cli-{}-{}.md", std::process::id(), unique));
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "termdown-cli-{}-{}-{}.md",
+            std::process::id(),
+            unique,
+            seq
+        ));
 
         fs::write(&path, contents).expect("failed to write temp markdown file");
         Self { path }

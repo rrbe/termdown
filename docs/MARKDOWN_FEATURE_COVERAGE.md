@@ -18,6 +18,7 @@ Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown exten
 | Horizontal rule | ✓ | |
 | HTML blocks | ✓ | Rendered verbatim as a dim preformatted block; HTML comments dropped |
 | Inline HTML | ⚠ | Format tags (`b`/`strong`, `i`/`em`, `u`, `s`/`del`/`strike`, `code`/`kbd`) map to ANSI; `<br/>` / `<hr/>` handled; comments dropped; unknown tags stripped but their content is preserved. Attributes (e.g. `style="color:red"`, `href`) are not interpreted. |
+| YAML / TOML frontmatter | ✓ | Parsed via pulldown-cmark's metadata-block extensions. Rendered as a dim one-line summary (`[metadata · key=value, …]`) in `--cat`; foldable inline box in TUI (toggle with `m`). Heuristic key/value extraction. See `docs/adr/0001-metadata-block-handling.md`. Opt out via `[metadata] show = false` in `~/.termdown/config.toml`. |
 
 ## Enabled GFM extensions
 
@@ -37,7 +38,6 @@ Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown exten
 
 - **Math** `$...$` / `$$...$$` — `ENABLE_MATH` not set
 - **Definition list** — not enabled
-- **YAML / TOML frontmatter** — not enabled; currently leaks into body
 - **Smart punctuation** — not enabled
 - **Wikilinks / Subscript / Superscript** — not enabled
 
@@ -50,6 +50,6 @@ Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown exten
 
 ## Suggested priorities
 
-1. **High value (hit in everyday Markdown)**: skip frontmatter, footnotes, alert/admonition styling, GFM autolinks, at least a graceful fallback for HTML
+1. **High value (hit in everyday Markdown)**: footnotes, alert/admonition styling, GFM autolinks, at least a graceful fallback for HTML
 2. **Differentiating (plays to termdown's Kitty-graphics strength)**: Mermaid rendering, real image rendering, code-block syntax highlighting
 3. **Nice to have**: math (KaTeX → image), smart punctuation, definition list

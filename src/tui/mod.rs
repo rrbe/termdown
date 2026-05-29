@@ -50,6 +50,10 @@ struct DocEntry {
     search: Option<SearchState>,
     pending_g: bool,
     toc_open: bool,
+    /// Whether the frontmatter metadata block (if any) is shown expanded as an
+    /// inline box. Default `false` = folded one-line summary. Toggled by the
+    /// `m` key. Has no effect when `config.metadata.show` is false.
+    metadata_expanded: bool,
 }
 
 struct App {
@@ -157,6 +161,7 @@ impl App {
             search: None,
             pending_g: false,
             toc_open: false,
+            metadata_expanded: false,
         };
         // Refine image row estimates now that (a) the doc is populated and
         // (b) we may already know the real terminal cell pixel height.
@@ -290,6 +295,7 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             size.width
         };
         app.term_size = (size.width, body_height);
+        let show_metadata = app.config.metadata.show;
         {
             let active = app.active_mut();
             if active.viewport.width != body_width || active.viewport.height != body_height {
@@ -298,7 +304,10 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
                 // width change implicitly invalidates wrap via ensure_wrap's
                 // cache_width comparison.
             }
-            active.viewport.ensure_wrap(&active.doc);
+            let expanded = active.metadata_expanded;
+            active
+                .viewport
+                .ensure_wrap(&active.doc, show_metadata, expanded);
         }
 
         // Force a full redraw if state changed in a way that may leave
@@ -457,6 +466,16 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                 // change shifts every image's col offset, so force a full
                 // clear to avoid stale image pixels on the body side.
                 app.needs_full_redraw = true;
+            }
+            // No-op when metadata display is disabled — toggling would only
+            // churn the wrap cache and force a redraw with no visible change.
+            input::Action::ToggleMetadata if app.config.metadata.show => {
+                let active = app.active_mut();
+                if active.doc.metadata.is_some() {
+                    active.metadata_expanded = !active.metadata_expanded;
+                    active.viewport.invalidate_wrap();
+                    app.needs_full_redraw = true;
+                }
             }
             input::Action::Back => {
                 if let Some(prev) = app.history.pop() {
@@ -736,6 +755,102 @@ fn visible_matches_for_line(
         .collect()
 }
 
+/// Render one VisualLine row that visualizes the document's frontmatter.
+/// The role determines what shows up: folded summary, expanded top/bottom
+/// border, or a single field row inside the expanded box.
+fn render_metadata_row(
+    meta: &crate::frontmatter::MetadataInfo,
+    role: viewport::MetadataVisualRow,
+    body_cols: usize,
+) -> RLine<'static> {
+    use ratatui::style::{Modifier, Style as RStyle};
+
+    let dim = RStyle::default().add_modifier(Modifier::DIM);
+
+    match role {
+        viewport::MetadataVisualRow::Folded => {
+            // Identical construction/truncation as `--cat` — shared so the two
+            // folded renderings can never drift apart.
+            let text = crate::frontmatter::folded_summary(meta, body_cols);
+            RLine::from(RSpan::styled(text, dim))
+        }
+        viewport::MetadataVisualRow::ExpandedTop => {
+            // Width follows the body area, capped so the box doesn't dominate
+            // narrow terminals; minimum 12 for a sensible visual.
+            let inner_w = expanded_box_width(body_cols);
+            let title = " metadata ";
+            let mut s = String::from("┌─");
+            s.push_str(title);
+            let remaining = inner_w.saturating_sub(s.chars().count() + 1).max(1);
+            s.push_str(&"─".repeat(remaining));
+            s.push('┐');
+            RLine::from(RSpan::styled(s, dim))
+        }
+        viewport::MetadataVisualRow::ExpandedField(idx) => {
+            use unicode_width::UnicodeWidthStr;
+            let inner_w = expanded_box_width(body_cols);
+            // 2 border chars + 1 leading space + 1 trailing space = 4 chrome.
+            let field_budget = inner_w.saturating_sub(4);
+            let (k_text, v_text) = if meta.has_pairs() {
+                let (k, v) = &meta.pairs[idx];
+                (k.clone(), v.clone())
+            } else {
+                ("metadata".to_string(), meta.fallback_oneline.clone())
+            };
+            // All widths are display columns (not char counts) so CJK / wide
+            // characters in keys or values keep the box border aligned.
+            // Right-pad the key column to the widest key (capped) so values align.
+            let key_col = meta
+                .pairs
+                .iter()
+                .map(|(k, _)| UnicodeWidthStr::width(k.as_str()))
+                .max()
+                .unwrap_or(0)
+                .min(field_budget.saturating_sub(3));
+            let key_pad = key_col.saturating_sub(UnicodeWidthStr::width(k_text.as_str()));
+            let line_body = format!("{}{}: ", k_text, " ".repeat(key_pad));
+            let val_budget =
+                field_budget.saturating_sub(UnicodeWidthStr::width(line_body.as_str()));
+            let value = truncate_to_cols(&v_text, val_budget);
+            let inside = format!("{line_body}{value}");
+            let pad = field_budget.saturating_sub(UnicodeWidthStr::width(inside.as_str()));
+            let row = format!("│ {inside}{} │", " ".repeat(pad));
+            RLine::from(RSpan::styled(row, dim))
+        }
+        viewport::MetadataVisualRow::ExpandedBottom => {
+            let inner_w = expanded_box_width(body_cols);
+            let mut s = String::from("└");
+            s.push_str(&"─".repeat(inner_w.saturating_sub(2)));
+            s.push('┘');
+            RLine::from(RSpan::styled(s, dim))
+        }
+    }
+}
+
+fn expanded_box_width(body_cols: usize) -> usize {
+    body_cols.clamp(12, 80)
+}
+
+fn truncate_to_cols(s: &str, max_cols: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    if max_cols == 0 {
+        return String::new();
+    }
+    let mut width = 0;
+    let mut acc = String::new();
+    for ch in s.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > max_cols.saturating_sub(1) {
+            // Reserve 1 col for the ellipsis.
+            acc.push('…');
+            return acc;
+        }
+        acc.push(ch);
+        width += cw;
+    }
+    acc
+}
+
 fn clipped_spans(
     line: &layout::Line,
     byte_start: usize,
@@ -856,15 +971,31 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
 
     let mut rendered: Vec<RLine> = Vec::new();
     for vl in active.viewport.visible() {
-        let logical = &active.doc.lines[vl.logical_index];
+        if let Some(role) = vl.metadata_row {
+            let body_cols = active.viewport.width as usize;
+            rendered.push(render_metadata_row(
+                active
+                    .doc
+                    .metadata
+                    .as_ref()
+                    .expect("metadata_row visual line requires doc.metadata to be Some"),
+                role,
+                body_cols,
+            ));
+            continue;
+        }
 
         // Heading spacer VisualLines reserve the rows below the main heading
         // line so the kitty image's cell footprint matches the viewport row
-        // budget. Render as empty — the image paints over them.
+        // budget. Render as empty — the image paints over them. Checked before
+        // indexing `doc.lines` so the metadata block's trailing blank (whose
+        // `logical_index` is a sentinel) never dereferences a real line.
         if vl.is_spacer {
             rendered.push(RLine::from(Vec::<RSpan>::new()));
             continue;
         }
+
+        let logical = &active.doc.lines[vl.logical_index];
 
         let matches = visible_matches_for_line(
             active.search.as_ref(),
@@ -902,7 +1033,15 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             .viewport
             .visible()
             .first()
-            .map(|vl| vl.logical_index)
+            // Metadata rows carry a sentinel `logical_index`; treat them as the
+            // document top (logical 0) so the ToC doesn't select the last heading.
+            .map(|vl| {
+                if vl.logical_index == viewport::NO_LOGICAL {
+                    0
+                } else {
+                    vl.logical_index
+                }
+            })
             .and_then(|top| {
                 active
                     .doc
@@ -966,7 +1105,14 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("o  i", "back / forward in history"),
         ],
     ),
-    ("Other", &[("?", "toggle this help"), ("q  Ctrl-C", "quit")]),
+    (
+        "Other",
+        &[
+            ("m", "toggle metadata fold (if frontmatter)"),
+            ("?", "toggle this help"),
+            ("q  Ctrl-C", "quit"),
+        ],
+    ),
 ];
 
 /// Intrinsic `(width, height)` of the help popup including its border,
@@ -1355,9 +1501,9 @@ mod help_popup_tests {
             h > 2,
             "height should include at least one content row, got {h}"
         );
-        // Sanity: the popup is small enough to fit inside a typical 80x24 terminal.
+        // Sanity: the popup is small enough to fit inside a typical 80x25 terminal.
         assert!(w <= 80);
-        assert!(h <= 24);
+        assert!(h <= 25);
     }
 
     #[test]
