@@ -10,6 +10,8 @@ title: Malformed Sample
 ---
 
 Body. The frontmatter above mixes a folded scalar and a nested mapping —
-shapes that the line-based heuristic cannot fully parse. It should still
-extract `description` and `title` while skipping the continuation lines,
-and the document should not break.
+shapes the line-based heuristic cannot fully understand. It skips the folded
+continuation lines (which have no separator), but it cannot tell that `key1` /
+`key2` are nested under `nested`, so it lifts them to top-level keys. The point
+of this fixture is that the heuristic degrades gracefully and the document does
+not break — not that the summary is semantically perfect.

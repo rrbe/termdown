@@ -467,7 +467,9 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                 // clear to avoid stale image pixels on the body side.
                 app.needs_full_redraw = true;
             }
-            input::Action::ToggleMetadata => {
+            // No-op when metadata display is disabled — toggling would only
+            // churn the wrap cache and force a redraw with no visible change.
+            input::Action::ToggleMetadata if app.config.metadata.show => {
                 let active = app.active_mut();
                 if active.doc.metadata.is_some() {
                     active.metadata_expanded = !active.metadata_expanded;
@@ -767,9 +769,9 @@ fn render_metadata_row(
 
     match role {
         viewport::MetadataVisualRow::Folded => {
-            let body = crate::frontmatter::format_pairs_inline(meta);
-            let full = format!("[metadata · {body}]");
-            let text = truncate_to_cols_keep_suffix(&full, body_cols, "]");
+            // Identical construction/truncation as `--cat` — shared so the two
+            // folded renderings can never drift apart.
+            let text = crate::frontmatter::folded_summary(meta, body_cols);
             RLine::from(RSpan::styled(text, dim))
         }
         viewport::MetadataVisualRow::ExpandedTop => {
@@ -785,6 +787,7 @@ fn render_metadata_row(
             RLine::from(RSpan::styled(s, dim))
         }
         viewport::MetadataVisualRow::ExpandedField(idx) => {
+            use unicode_width::UnicodeWidthStr;
             let inner_w = expanded_box_width(body_cols);
             // 2 border chars + 1 leading space + 1 trailing space = 4 chrome.
             let field_budget = inner_w.saturating_sub(4);
@@ -794,20 +797,23 @@ fn render_metadata_row(
             } else {
                 ("metadata".to_string(), meta.fallback_oneline.clone())
             };
-            // Right-pad key column to the longest key (capped) so values align.
+            // All widths are display columns (not char counts) so CJK / wide
+            // characters in keys or values keep the box border aligned.
+            // Right-pad the key column to the widest key (capped) so values align.
             let key_col = meta
                 .pairs
                 .iter()
-                .map(|(k, _)| k.chars().count())
+                .map(|(k, _)| UnicodeWidthStr::width(k.as_str()))
                 .max()
                 .unwrap_or(0)
                 .min(field_budget.saturating_sub(3));
-            let key_pad = key_col.saturating_sub(k_text.chars().count());
+            let key_pad = key_col.saturating_sub(UnicodeWidthStr::width(k_text.as_str()));
             let line_body = format!("{}{}: ", k_text, " ".repeat(key_pad));
-            let val_budget = field_budget.saturating_sub(line_body.chars().count());
+            let val_budget =
+                field_budget.saturating_sub(UnicodeWidthStr::width(line_body.as_str()));
             let value = truncate_to_cols(&v_text, val_budget);
             let inside = format!("{line_body}{value}");
-            let pad = field_budget.saturating_sub(inside.chars().count());
+            let pad = field_budget.saturating_sub(UnicodeWidthStr::width(inside.as_str()));
             let row = format!("│ {inside}{} │", " ".repeat(pad));
             RLine::from(RSpan::styled(row, dim))
         }
@@ -842,32 +848,6 @@ fn truncate_to_cols(s: &str, max_cols: usize) -> String {
         acc.push(ch);
         width += cw;
     }
-    acc
-}
-
-/// Like `truncate_to_cols` but, when truncation happens, preserves a literal
-/// `suffix` at the very end. Used to keep the closing `]` on the folded
-/// metadata chip visible after the ellipsis.
-fn truncate_to_cols_keep_suffix(s: &str, max_cols: usize, suffix: &str) -> String {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    if UnicodeWidthStr::width(s) <= max_cols {
-        return s.to_string();
-    }
-    let suffix_w = UnicodeWidthStr::width(suffix);
-    // Reserve 1 col for `…` + `suffix_w` for the kept tail.
-    let budget = max_cols.saturating_sub(suffix_w + 1);
-    let mut width = 0;
-    let mut acc = String::new();
-    for ch in s.chars() {
-        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + cw > budget {
-            break;
-        }
-        acc.push(ch);
-        width += cw;
-    }
-    acc.push('…');
-    acc.push_str(suffix);
     acc
 }
 
@@ -1005,15 +985,17 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             continue;
         }
 
-        let logical = &active.doc.lines[vl.logical_index];
-
         // Heading spacer VisualLines reserve the rows below the main heading
         // line so the kitty image's cell footprint matches the viewport row
-        // budget. Render as empty — the image paints over them.
+        // budget. Render as empty — the image paints over them. Checked before
+        // indexing `doc.lines` so the metadata block's trailing blank (whose
+        // `logical_index` is a sentinel) never dereferences a real line.
         if vl.is_spacer {
             rendered.push(RLine::from(Vec::<RSpan>::new()));
             continue;
         }
+
+        let logical = &active.doc.lines[vl.logical_index];
 
         let matches = visible_matches_for_line(
             active.search.as_ref(),
@@ -1051,7 +1033,15 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             .viewport
             .visible()
             .first()
-            .map(|vl| vl.logical_index)
+            // Metadata rows carry a sentinel `logical_index`; treat them as the
+            // document top (logical 0) so the ToC doesn't select the last heading.
+            .map(|vl| {
+                if vl.logical_index == viewport::NO_LOGICAL {
+                    0
+                } else {
+                    vl.logical_index
+                }
+            })
             .and_then(|top| {
                 active
                     .doc

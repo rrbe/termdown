@@ -5,6 +5,12 @@
 
 use crate::layout::{Line, RenderedDoc, Span};
 
+/// Sentinel `logical_index` for VisualLines that don't map to any `doc.lines`
+/// entry — the metadata block's rows and its trailing blank. Using `usize::MAX`
+/// (no real line ever reaches it) keeps logical→visual lookups used by search
+/// and heading navigation from matching real line 0.
+pub const NO_LOGICAL: usize = usize::MAX;
+
 /// A wrapped visual line, pointing back to a logical `Line` and the byte
 /// range of its content that this visual slice covers.
 #[derive(Debug, Clone)]
@@ -17,7 +23,7 @@ pub struct VisualLine {
     /// These rows render as blank and do not carry image placements.
     pub is_spacer: bool,
     /// Set on rows that visualize the document's frontmatter metadata block.
-    /// `logical_index` is meaningless for these rows — `draw()` consults
+    /// `logical_index` is [`NO_LOGICAL`] for these rows — `draw()` consults
     /// `doc.metadata` instead. See `docs/adr/0001-metadata-block-handling.md`.
     pub metadata_row: Option<MetadataVisualRow>,
 }
@@ -126,9 +132,13 @@ impl Viewport {
         let start_logical = self
             .visual_lines
             .get(after_visual)
-            .map(|vl| vl.logical_index)
-            .unwrap_or(0);
-        let target = doc.headings.iter().find(|h| h.line_index > start_logical);
+            .map(|vl| vl.logical_index);
+        // On a metadata/sentinel row we're above the body, so the first heading
+        // is "next"; otherwise the first heading strictly after the current line.
+        let target = match start_logical {
+            Some(l) if l != NO_LOGICAL => doc.headings.iter().find(|h| h.line_index > l),
+            _ => doc.headings.first(),
+        };
         if let Some(h) = target {
             if let Some(vi) = self
                 .visual_lines
@@ -146,13 +156,12 @@ impl Viewport {
         let start_logical = self
             .visual_lines
             .get(before_visual)
-            .map(|vl| vl.logical_index)
-            .unwrap_or(0);
-        let target = doc
-            .headings
-            .iter()
-            .rev()
-            .find(|h| h.line_index < start_logical);
+            .map(|vl| vl.logical_index);
+        // A metadata/sentinel row sits above every heading, so nothing precedes it.
+        let target = match start_logical {
+            Some(l) if l != NO_LOGICAL => doc.headings.iter().rev().find(|h| h.line_index < l),
+            _ => None,
+        };
         if let Some(h) = target {
             if let Some(vi) = self
                 .visual_lines
@@ -173,15 +182,19 @@ fn metadata_visual_lines(
     meta: &crate::frontmatter::MetadataInfo,
     expanded: bool,
 ) -> Vec<VisualLine> {
+    // All metadata rows carry the sentinel logical index — they don't map to
+    // any `doc.lines` entry. See [`NO_LOGICAL`].
+    let row = |metadata_row: Option<MetadataVisualRow>, is_spacer: bool| VisualLine {
+        logical_index: NO_LOGICAL,
+        byte_start: 0,
+        byte_end: 0,
+        is_spacer,
+        metadata_row,
+    };
+
     let mut out = Vec::new();
     if !expanded {
-        out.push(VisualLine {
-            logical_index: 0,
-            byte_start: 0,
-            byte_end: 0,
-            is_spacer: false,
-            metadata_row: Some(MetadataVisualRow::Folded),
-        });
+        out.push(row(Some(MetadataVisualRow::Folded), false));
     } else {
         let row_count = if meta.has_pairs() {
             meta.pairs.len()
@@ -189,40 +202,16 @@ fn metadata_visual_lines(
             1
         };
         out.reserve(row_count + 2);
-        out.push(VisualLine {
-            logical_index: 0,
-            byte_start: 0,
-            byte_end: 0,
-            is_spacer: false,
-            metadata_row: Some(MetadataVisualRow::ExpandedTop),
-        });
+        out.push(row(Some(MetadataVisualRow::ExpandedTop), false));
         for i in 0..row_count {
-            out.push(VisualLine {
-                logical_index: 0,
-                byte_start: 0,
-                byte_end: 0,
-                is_spacer: false,
-                metadata_row: Some(MetadataVisualRow::ExpandedField(i)),
-            });
+            out.push(row(Some(MetadataVisualRow::ExpandedField(i)), false));
         }
-        out.push(VisualLine {
-            logical_index: 0,
-            byte_start: 0,
-            byte_end: 0,
-            is_spacer: false,
-            metadata_row: Some(MetadataVisualRow::ExpandedBottom),
-        });
+        out.push(row(Some(MetadataVisualRow::ExpandedBottom), false));
     }
     // Trailing blank row: separate the metadata block from whatever heading
     // or paragraph follows. Rendered as empty via the existing `is_spacer`
     // branch in `draw()`.
-    out.push(VisualLine {
-        logical_index: 0,
-        byte_start: 0,
-        byte_end: 0,
-        is_spacer: true,
-        metadata_row: None,
-    });
+    out.push(row(None, true));
     out
 }
 
@@ -470,6 +459,72 @@ mod tests {
 
         vp.jump_to_prev_heading(&doc, 7);
         assert_eq!(vp.top, 3);
+    }
+
+    #[test]
+    fn heading_jump_accounts_for_metadata_rows() {
+        use crate::frontmatter::{MetadataInfo, MetadataKind};
+        use crate::layout::{HeadingEntry, Line, LineKind, Span, Style};
+
+        // A doc whose very first body line (logical 0) is a heading, preceded
+        // by a shown frontmatter block. The folded metadata occupies visual
+        // rows 0 (summary) + 1 (trailing blank), so the heading at logical 0
+        // lands on visual row 2 — jumps must resolve to the real heading, not
+        // a metadata row that also (formerly) carried logical_index 0.
+        let lines: Vec<Line> = (0..5)
+            .map(|i| Line {
+                spans: vec![Span::Text {
+                    content: format!("row {i}"),
+                    style: Style::default(),
+                }],
+                kind: LineKind::Body,
+            })
+            .collect();
+        let headings = vec![
+            HeadingEntry {
+                level: 1,
+                text: "A".into(),
+                line_index: 0,
+            },
+            HeadingEntry {
+                level: 1,
+                text: "B".into(),
+                line_index: 3,
+            },
+        ];
+        let doc = RenderedDoc {
+            lines,
+            headings,
+            images: vec![],
+            metadata: Some(MetadataInfo {
+                kind: MetadataKind::Yaml,
+                pairs: vec![("title".into(), "T".into())],
+                fallback_oneline: String::new(),
+            }),
+        };
+        let mut vp = Viewport::new(3, 40);
+        vp.ensure_wrap(&doc, true, false);
+
+        // Two metadata visual rows precede the body.
+        assert!(matches!(
+            vp.visual_lines[0].metadata_row,
+            Some(MetadataVisualRow::Folded)
+        ));
+        assert_eq!(vp.visual_lines[0].logical_index, NO_LOGICAL);
+
+        // From the metadata top row, "next heading" finds the first heading
+        // (logical 0), which sits at visual row 2.
+        vp.jump_to_next_heading(&doc, 0);
+        assert_eq!(vp.top, 2);
+
+        // Next from there moves to heading B (logical 3) at visual row 5.
+        vp.jump_to_next_heading(&doc, vp.top);
+        assert_eq!(vp.top, 5);
+
+        // Prev from a metadata/sentinel top row is a no-op (nothing above).
+        vp.top = 0;
+        vp.jump_to_prev_heading(&doc, 0);
+        assert_eq!(vp.top, 0);
     }
 
     #[test]
