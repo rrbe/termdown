@@ -5,7 +5,7 @@
 ```
 src/
 ├── main.rs       CLI entry point, arg parsing, terminal state management
-├── config.rs     ~/.termdown/config.toml loading (serde)
+├── config.rs     ~/.config/termdown/config.toml loading (serde)
 ├── font.rs       Font resolution, caching, CJK/Latin detection
 ├── style.rs      HeadingStyle, ANSI constants, display width utilities
 ├── render.rs     Text measurement, glyph drawing, PNG encoding, Kitty protocol
@@ -145,7 +145,7 @@ On UNIX, `main.rs` temporarily disables terminal echo before rendering and resto
 
 ## Configuration
 
-`~/.termdown/config.toml` is deserialized via serde:
+`~/.config/termdown/config.toml` is deserialized via serde:
 
 ```
 Config

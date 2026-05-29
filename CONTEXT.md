@@ -36,7 +36,7 @@ The two display states for a metadata block in TUI mode:
 Cat mode has no "expanded" state — only the one-line summary or nothing.
 
 ### `[metadata] show`
-The single config knob (in `~/.termdown/config.toml`) controlling whether
+The single config knob (in `~/.config/termdown/config.toml`) controlling whether
 frontmatter is visible at all. `show = true` (default) renders the [[metadata
 one-line summary]] / expanded box; `show = false` hides the metadata block in
 **both** cat and TUI. The pulldown-cmark metadata extensions are always

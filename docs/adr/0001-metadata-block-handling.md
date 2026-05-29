@@ -42,7 +42,7 @@ as body content and not as completely invisible noise:
    own row. The box is part of the scrolling content (not pinned), not part
    of search, and not part of the Table of Contents. Default state is folded.
 6. **Config gate**: A single boolean knob `[metadata] show` (default `true`)
-   in `~/.termdown/config.toml`. When `false`, frontmatter is **completely
+   in `~/.config/termdown/config.toml`. When `false`, frontmatter is **completely
    hidden** in both cat and TUI; `m` becomes a no-op. The pulldown extensions
    remain enabled — `show` gates rendering only, never parsing, so frontmatter
    never leaks back into body regardless of config.
@@ -128,7 +128,8 @@ as body content and not as completely invisible noise:
 
 ## Open follow-ups
 
-- Migration of config dir from `~/.termdown/` to XDG `~/.config/termdown/`
-  is unrelated and explicitly out of scope here.
+- Migration of the config dir from `~/.termdown/` to XDG `~/.config/termdown/`
+  is handled alongside this change (same branch); see `config.example.toml`
+  and the `## Configuration` section of the README.
 - "Use `title` field in TUI title bar" — sketched as a future enhancement,
   not committed.

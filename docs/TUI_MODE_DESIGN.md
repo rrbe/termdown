@@ -31,7 +31,7 @@ if you want the "why this stack"; this doc is the "what we're building".
 - Future evolution (documented but not implemented in v1):
   - Automatic mode when output is a TTY and the rendered document
     exceeds terminal height (git-log-style).
-  - `[tui]` section in `~/.termdown/config.toml` to opt into automatic
+  - `[tui]` section in `~/.config/termdown/config.toml` to opt into automatic
     mode or override defaults.
 
 Single binary, no cargo feature flag. TUI code is always compiled in;
