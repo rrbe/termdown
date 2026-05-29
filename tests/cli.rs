@@ -347,9 +347,9 @@ fn xdg_config_home_is_honored_for_config_loading() {
     );
 
     // A `config.toml` placed at `$XDG_CONFIG_HOME/termdown/` must take effect:
-    // `show = false` hides the summary the baseline rendered.
+    // `metadata = false` hides the summary the baseline rendered.
     let cfg = TempDir::new();
-    cfg.write("termdown/config.toml", "[metadata]\nshow = false\n");
+    cfg.write("termdown/config.toml", "metadata = false\n");
     let configured = run_termdown(
         &["--cat", path],
         None,

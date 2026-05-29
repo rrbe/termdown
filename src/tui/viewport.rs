@@ -65,7 +65,7 @@ impl Viewport {
 
     /// (Re)compute the wrap cache if width, metadata visibility, or fold state
     /// have changed since the last call. `show_metadata` and `expanded` come
-    /// from `Config.metadata.show` and `DocEntry.metadata_expanded` respectively.
+    /// from `Config.metadata` and `DocEntry.metadata_expanded` respectively.
     pub fn ensure_wrap(&mut self, doc: &RenderedDoc, show_metadata: bool, expanded: bool) {
         if self.cache_width == self.width
             && self.cache_metadata_expanded == expanded
