@@ -13,7 +13,7 @@ pub struct RenderedDoc {
     pub images: Vec<HeadingImage>,
     /// Parsed frontmatter, if the document opens with a YAML (`---`) or TOML
     /// (`+++`) metadata block. The block content never appears in `lines`
-    /// regardless of [`config.metadata.show`]; renderers consult this field
+    /// regardless of [`config.metadata`]; renderers consult this field
     /// directly and decide how (or whether) to display it.
     pub metadata: Option<MetadataInfo>,
 }
@@ -101,7 +101,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     opts.insert(Options::ENABLE_TASKLISTS);
     // Both metadata block flavors are always enabled — they only ever match
     // at line 1 column 1, so they can't false-positive in regular content.
-    // The `[metadata] show` config knob gates *display*, not parsing.
+    // The `metadata` config knob gates *display*, not parsing.
     opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
     opts.insert(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
     let parser = Parser::new_ext(md, opts);

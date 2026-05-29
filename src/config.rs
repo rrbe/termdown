@@ -17,31 +17,13 @@ pub struct Config {
     /// `--no-bell` overrides to `Some(false)`.
     pub bell: Option<bool>,
 
-    #[serde(default)]
-    pub metadata: MetadataSection,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct MetadataSection {
     /// Whether to render frontmatter (YAML `---` / TOML `+++` metadata blocks).
-    /// `true` (default) shows the one-line summary in cat / TUI-folded, and
-    /// allows the TUI `m` key to expand. `false` hides metadata entirely;
-    /// parsing still runs so the block never leaks into body content.
+    /// Mirrors `bell`: `None` (key absent) and `Some(true)` both render — the
+    /// one-line summary in cat / TUI-folded, with the TUI `m` key to expand.
+    /// `Some(false)` hides metadata entirely; parsing still runs so the block
+    /// never leaks into body content.
     /// See `docs/adr/0001-metadata-block-handling.md`.
-    #[serde(default = "default_metadata_show")]
-    pub show: bool,
-}
-
-fn default_metadata_show() -> bool {
-    true
-}
-
-impl Default for MetadataSection {
-    fn default() -> Self {
-        Self {
-            show: default_metadata_show(),
-        }
-    }
+    pub metadata: Option<bool>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -127,9 +109,10 @@ mod tests {
         // The example spells out the *effective* defaults explicitly.
         assert_eq!(parsed.theme.as_deref(), Some("auto"));
         assert_eq!(parsed.bell, Some(true));
-        // `metadata.show` is a real struct default — assert the example tracks it.
-        assert_eq!(parsed.metadata.show, Config::default().metadata.show);
-        assert!(parsed.metadata.show);
+        // `metadata` mirrors `bell`: the example spells out the effective
+        // default explicitly as `Some(true)` (a missing key parses as `None`,
+        // which is also treated as "show").
+        assert_eq!(parsed.metadata, Some(true));
         // Font overrides are commented out, so they must parse as unset.
         assert!(parsed.font.heading.latin.is_none());
         assert!(parsed.font.heading.cjk.is_none());

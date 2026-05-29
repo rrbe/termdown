@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content. `--cat` renders a dim one-line summary
   (`[metadata · key=value, …]`); TUI shows the same line and can expand it
   to an inline key/value box with the new `m` key. A blank row follows the
-  summary for visual separation. Opt out entirely via `[metadata] show = false`
+  summary for visual separation. Opt out entirely via `metadata = false`
   in `~/.config/termdown/config.toml`. See `docs/adr/0001-metadata-block-handling.md`.
 
 ### Changed

@@ -18,12 +18,11 @@ theme = "auto"
 # CLI override: --no-bell.
 bell = true
 
-[metadata]
 # Render YAML (`---`) / TOML (`+++`) frontmatter metadata blocks. When true
 # (default), --cat and the TUI show a dim one-line summary, and the TUI `m`
 # key expands it to a key/value box. When false, metadata is hidden entirely
 # (it is still parsed, so it never leaks into body content).
-show = true
+metadata = true
 
 [font.heading]
 # Fonts for image-rendered headings (H1–H3). When unset, termdown uses
