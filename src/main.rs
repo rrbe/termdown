@@ -37,7 +37,7 @@ fn main() {
         println!("By default, passing FILE opens it in the interactive TUI.");
         println!("Piped/redirected stdout and stdin input automatically use cat mode.");
         println!();
-        println!("Config: ~/.termdown/config.toml");
+        println!("Config: ~/.config/termdown/config.toml");
         return;
     }
 

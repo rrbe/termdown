@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh |
 
 ```sh
 rm $(which termdown)
-rm -rf ~/.termdown
+rm -rf ~/.config/termdown
 ```
 
 </details>
@@ -139,7 +139,10 @@ TUI mode requires a file path; stdin input is not supported.
 
 ## Configuration
 
-termdown reads configuration from `~/.termdown/config.toml`.
+termdown reads configuration from `~/.config/termdown/config.toml` (or
+`$XDG_CONFIG_HOME/termdown/config.toml` if `XDG_CONFIG_HOME` is set). All
+settings are optional; see [`config.example.toml`](config.example.toml) for a
+copy-pasteable file with every default.
 
 ```toml
 # Theme: "auto" (default), "dark", or "light"

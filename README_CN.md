@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh |
 
 ```sh
 rm $(which termdown)
-rm -rf ~/.termdown
+rm -rf ~/.config/termdown
 ```
 
 </details>
@@ -131,7 +131,9 @@ TUI 模式需要指定文件路径，不支持从 stdin 读取。
 
 ## 配置
 
-配置文件位于 `~/.termdown/config.toml`。
+配置文件位于 `~/.config/termdown/config.toml`（若设置了 `XDG_CONFIG_HOME`，则为
+`$XDG_CONFIG_HOME/termdown/config.toml`）。所有配置项均为可选；仓库根目录的
+[`config.example.toml`](config.example.toml) 提供了一份包含全部默认值、可直接复制的示例。
 
 ```toml
 # 主题："auto"（默认）、"dark" 或 "light"

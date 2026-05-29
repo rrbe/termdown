@@ -14,7 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`[metadata · key=value, …]`); TUI shows the same line and can expand it
   to an inline key/value box with the new `m` key. A blank row follows the
   summary for visual separation. Opt out entirely via `[metadata] show = false`
-  in `~/.termdown/config.toml`. See `docs/adr/0001-metadata-block-handling.md`.
+  in `~/.config/termdown/config.toml`. See `docs/adr/0001-metadata-block-handling.md`.
+
+### Changed
+- **Config location moved to the XDG path.** termdown now reads
+  `~/.config/termdown/config.toml` (or `$XDG_CONFIG_HOME/termdown/config.toml`)
+  instead of `~/.termdown/config.toml`. If a legacy `~/.termdown/config.toml`
+  is found while the new path is empty, termdown prints a one-line warning so
+  the old settings aren't dropped silently — move the file to the new location
+  to clear it. A documented `config.example.toml` with every default ships in
+  the repo root.
 
 ## [0.5.1] - 2026-05-26
 

@@ -19,6 +19,13 @@ fn run_termdown(
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
+    // Isolate config loading from the developer/CI environment so a real
+    // ~/.config/termdown/config.toml (or $XDG_CONFIG_HOME) can't leak in.
+    // Callers may re-set any of these via `envs`.
+    command.env_remove("HOME");
+    command.env_remove("USERPROFILE");
+    command.env_remove("XDG_CONFIG_HOME");
+
     if stdin.is_some() {
         command.stdin(Stdio::piped());
     }
@@ -122,6 +129,54 @@ impl Drop for TempMarkdownFile {
     }
 }
 
+/// A throwaway directory tree, cleaned up on drop. Files are written at
+/// caller-chosen relative paths so the same helper can stage either an XDG
+/// config root (`termdown/config.toml`) or a fake `$HOME` (`.termdown/...`).
+struct TempDir {
+    root: PathBuf,
+}
+
+impl TempDir {
+    fn new() -> Self {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "termdown-cfg-{}-{}-{}",
+            std::process::id(),
+            unique,
+            seq
+        ));
+        fs::create_dir_all(&root).expect("failed to create temp dir");
+        Self { root }
+    }
+
+    fn write(&self, rel: &str, contents: &str) {
+        let path = self.root.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("failed to create temp subdir");
+        }
+        fs::write(path, contents).expect("failed to write temp file");
+    }
+
+    fn path_str(&self) -> &str {
+        self.root.to_str().expect("temp path should be valid UTF-8")
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+// Body is a plain paragraph (not a heading) so it renders as text under
+// ghostty rather than as a Kitty-graphics image.
+const FRONTMATTER_DOC: &str = "---\ntitle: Hello\nauthor: Me\n---\n\nPlain body text.\n";
+
 #[test]
 fn help_flag_prints_usage() {
     let output = run_termdown(&["--help"], None, &[], &[]);
@@ -130,7 +185,7 @@ fn help_flag_prints_usage() {
     assert!(output.status.success());
     assert!(stdout.contains("Render Markdown with large-font headings in the terminal"));
     assert!(stdout.contains("Usage:"));
-    assert!(stdout.contains("Config: ~/.termdown/config.toml"));
+    assert!(stdout.contains("Config: ~/.config/termdown/config.toml"));
     assert!(stderr_text(&output).trim().is_empty());
 }
 
@@ -271,4 +326,80 @@ fn cat_flag_forces_cat_output_with_file() {
 
     assert!(output.status.success(), "stderr: {}", stderr_text(&output));
     assert!(stdout.contains("plain content"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn xdg_config_home_is_honored_for_config_loading() {
+    let doc = TempMarkdownFile::new(FRONTMATTER_DOC);
+    let path = doc.path().to_str().expect("path should be valid UTF-8");
+
+    // Baseline: with no config at all, the folded metadata summary is shown.
+    let baseline = run_termdown(&["--cat", path], None, &[("TERM_PROGRAM", "ghostty")], &[]);
+    let baseline_out = strip_ansi(&stdout_text(&baseline));
+    assert!(
+        baseline.status.success(),
+        "stderr: {}",
+        stderr_text(&baseline)
+    );
+    assert!(
+        baseline_out.contains("[metadata ·"),
+        "baseline should show the metadata summary, was: {baseline_out:?}"
+    );
+
+    // A `config.toml` placed at `$XDG_CONFIG_HOME/termdown/` must take effect:
+    // `show = false` hides the summary the baseline rendered.
+    let cfg = TempDir::new();
+    cfg.write("termdown/config.toml", "[metadata]\nshow = false\n");
+    let configured = run_termdown(
+        &["--cat", path],
+        None,
+        &[
+            ("TERM_PROGRAM", "ghostty"),
+            ("XDG_CONFIG_HOME", cfg.path_str()),
+        ],
+        &[],
+    );
+    let configured_out = strip_ansi(&stdout_text(&configured));
+    assert!(
+        configured.status.success(),
+        "stderr: {}",
+        stderr_text(&configured)
+    );
+    assert!(
+        !configured_out.contains("[metadata"),
+        "config should hide the metadata summary, was: {configured_out:?}"
+    );
+    assert!(
+        configured_out.contains("Plain body text"),
+        "body should still render, was: {configured_out:?}"
+    );
+}
+
+#[test]
+fn legacy_config_location_triggers_migration_warning() {
+    // A fake $HOME that still holds the pre-XDG `~/.termdown/config.toml` but
+    // has no config at the new XDG path. termdown should ignore the legacy
+    // file and warn the user to move it, instead of failing silently.
+    let home = TempDir::new();
+    home.write(".termdown/config.toml", "theme = \"dark\"\n");
+
+    let doc = TempMarkdownFile::new("hello\n");
+    let path = doc.path().to_str().expect("path should be valid UTF-8");
+    let output = run_termdown(
+        &["--cat", path],
+        None,
+        &[("TERM_PROGRAM", "ghostty"), ("HOME", home.path_str())],
+        &[],
+    );
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+    let stderr = stderr_text(&output);
+    assert!(
+        stderr.contains("ignoring legacy config"),
+        "expected a migration warning, stderr was: {stderr:?}"
+    );
+    assert!(
+        stderr.contains(".termdown/config.toml"),
+        "warning should name the legacy path, stderr was: {stderr:?}"
+    );
 }

@@ -1,0 +1,40 @@
+# termdown configuration
+#
+# Copy this file to:
+#   ~/.config/termdown/config.toml
+#   (or $XDG_CONFIG_HOME/termdown/config.toml when XDG_CONFIG_HOME is set)
+#
+# Every value below is termdown's built-in default, so an empty or missing
+# config behaves exactly like this file. Uncomment and edit only what you
+# want to change.
+
+# Color theme: "auto" (default), "dark", or "light".
+# "auto" detects the terminal background via OSC 11.
+theme = "auto"
+
+# Vim-style edge bell: emit a terminal BEL when you scroll past the top or
+# bottom of the document. The terminal emulator decides the visible effect
+# (audible beep, title-bar 🔔, dock bounce, …). Default true.
+# CLI override: --no-bell.
+bell = true
+
+[metadata]
+# Render YAML (`---`) / TOML (`+++`) frontmatter metadata blocks. When true
+# (default), --cat and the TUI show a dim one-line summary, and the TUI `m`
+# key expands it to a key/value box. When false, metadata is hidden entirely
+# (it is still parsed, so it never leaks into body content).
+show = true
+
+[font.heading]
+# Fonts for image-rendered headings (H1–H3). When unset, termdown uses
+# platform defaults and falls back to an embedded SourceSerif4 font. Body
+# text always uses your terminal's own font, not these.
+
+# Latin / ASCII heading font (sans-serif recommended).
+# latin = "Inter"
+
+# CJK heading font.
+# cjk = "LXGW WenKai"
+
+# Emoji / symbol fallback font for headings.
+# emoji = "Apple Color Emoji"
