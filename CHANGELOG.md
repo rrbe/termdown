@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the old settings aren't dropped silently — move the file to the new location
   to clear it. A documented `config.example.toml` with every default ships in
   the repo root.
+- **Config parsing is now strict.** An unknown key (e.g. a typo like `bel` for
+  `bell`) or an invalid `theme` value is reported as a one-line warning and the
+  config falls back to defaults, instead of being silently ignored. `--theme`
+  likewise warns on an unrecognized value rather than quietly auto-detecting.
 
 ## [0.5.1] - 2026-05-26
 

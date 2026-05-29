@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 #[derive(Deserialize, Default, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub font: FontSection,
 
-    /// Theme override: "dark", "light", or "auto" (default).
-    pub theme: Option<String>,
+    /// Color theme. `None` (key absent) means `Auto`. An unrecognized value is
+    /// a hard parse error surfaced by `load`, not a silent fallback to auto.
+    pub theme: Option<ThemeChoice>,
 
     /// Vim-style edge bell: emit a terminal BEL when the user tries to scroll
     /// past the top or bottom of the document. The terminal emulator decides
@@ -26,13 +28,40 @@ pub struct Config {
     pub metadata: Option<bool>,
 }
 
+/// Color theme selection. `Auto` (the default when the key is absent) detects
+/// the terminal background via OSC 11; `Dark` / `Light` force a palette.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    Auto,
+    Dark,
+    Light,
+}
+
+impl std::str::FromStr for ThemeChoice {
+    type Err = ();
+
+    /// Parse a CLI `--theme` value. Mirrors the serde `rename_all = "lowercase"`
+    /// mapping so the flag and the config file accept exactly the same names.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Auto),
+            "dark" => Ok(Self::Dark),
+            "light" => Ok(Self::Light),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Deserialize, Default, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct FontSection {
     #[serde(default)]
     pub heading: HeadingFontConfig,
 }
 
 #[derive(Deserialize, Default, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct HeadingFontConfig {
     /// Font for Latin / ASCII text (sans-serif recommended, e.g. "Inter").
     pub latin: Option<String>,
@@ -107,7 +136,7 @@ mod tests {
             toml::from_str(example).expect("config.example.toml must remain valid TOML");
 
         // The example spells out the *effective* defaults explicitly.
-        assert_eq!(parsed.theme.as_deref(), Some("auto"));
+        assert_eq!(parsed.theme, Some(ThemeChoice::Auto));
         assert_eq!(parsed.bell, Some(true));
         // `metadata` mirrors `bell`: the example spells out the effective
         // default explicitly as `Some(true)` (a missing key parses as `None`,
@@ -117,5 +146,38 @@ mod tests {
         assert!(parsed.font.heading.latin.is_none());
         assert!(parsed.font.heading.cjk.is_none());
         assert!(parsed.font.heading.emoji.is_none());
+    }
+
+    /// A valid `theme` deserializes to the matching enum; the field is optional.
+    #[test]
+    fn theme_parses_known_values_and_defaults_to_none() {
+        let parsed: Config = toml::from_str("theme = \"dark\"").unwrap();
+        assert_eq!(parsed.theme, Some(ThemeChoice::Dark));
+        assert_eq!(Config::default().theme, None);
+    }
+
+    /// An unrecognized `theme` is a hard error, not a silent fallback to auto —
+    /// `load` turns this into a one-line warning instead of dropping it.
+    #[test]
+    fn invalid_theme_value_is_rejected() {
+        assert!(toml::from_str::<Config>("theme = \"drak\"").is_err());
+    }
+
+    /// `deny_unknown_fields` catches typo'd keys (e.g. `bel` for `bell`) rather
+    /// than silently ignoring them.
+    #[test]
+    fn unknown_top_level_key_is_rejected() {
+        assert!(toml::from_str::<Config>("bel = false").is_err());
+    }
+
+    /// The CLI `--theme` parser accepts exactly the config file's value set.
+    #[test]
+    fn theme_choice_from_str_matches_serde_names() {
+        use std::str::FromStr;
+        assert_eq!(ThemeChoice::from_str("auto"), Ok(ThemeChoice::Auto));
+        assert_eq!(ThemeChoice::from_str("dark"), Ok(ThemeChoice::Dark));
+        assert_eq!(ThemeChoice::from_str("light"), Ok(ThemeChoice::Light));
+        assert!(ThemeChoice::from_str("Dark").is_err());
+        assert!(ThemeChoice::from_str("blue").is_err());
     }
 }
