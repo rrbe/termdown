@@ -133,3 +133,16 @@ as body content and not as completely invisible noise:
   and the `## Configuration` section of the README.
 - "Use `title` field in TUI title bar" — sketched as a future enhancement,
   not committed.
+
+## Amendment — 2026-05-29
+
+The config gate (decision #6) was originally implemented as a nested table
+`[metadata] show = true`. Before the feature shipped in a release, it was
+flattened to a top-level `metadata = true` boolean. Rationale: a single on/off
+toggle does not earn its own `[section]`, and the nested form was inconsistent
+with the sibling top-level switches (`theme`, `bell`) — the ADR itself rejected
+extra metadata knobs as YAGNI, which undercut the only justification for the
+table. Implemented as `Option<bool>` exactly like `bell`: `None` (key absent)
+and `Some(true)` render, `Some(false)` hides. If functional frontmatter
+features (e.g. piping `title` to the title bar) ever land, the knob can be
+re-promoted to a `[metadata]` table at that point.

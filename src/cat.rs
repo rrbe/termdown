@@ -16,7 +16,7 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
 
-    if config.metadata.show {
+    if config.metadata.unwrap_or(true) {
         if let Some(meta) = &doc.metadata {
             write_metadata_oneline(&mut out, meta, term_width);
             let _ = writeln!(&mut out);

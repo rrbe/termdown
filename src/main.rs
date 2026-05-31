@@ -11,6 +11,8 @@ mod tui;
 use std::fs;
 use std::io::{self, Read};
 
+use crate::config::ThemeChoice;
+
 use crossterm::tty::IsTty;
 use terminal_size::{terminal_size, Width};
 
@@ -56,14 +58,24 @@ fn main() {
         config.bell = Some(false);
     }
 
-    // Parse --theme flag (takes precedence over config).
-    let cli_theme = args
-        .windows(2)
-        .find(|w| w[0] == "--theme")
-        .map(|w| w[1].clone());
+    // Parse --theme flag (takes precedence over config). An unrecognized value
+    // warns and falls through to config/auto instead of being silently
+    // swallowed, matching how the config file reports an invalid theme.
+    let cli_theme = args.windows(2).find(|w| w[0] == "--theme").and_then(|w| {
+        match w[1].parse::<ThemeChoice>() {
+            Ok(choice) => Some(choice),
+            Err(()) => {
+                eprintln!(
+                    "Warning: ignoring invalid --theme value {:?}; expected auto, dark, or light",
+                    w[1]
+                );
+                None
+            }
+        }
+    });
 
     // Resolve theme: CLI flag > config file > auto-detect.
-    let theme = resolve_theme(cli_theme.as_deref(), config.theme.as_deref());
+    let theme = resolve_theme(cli_theme, config.theme);
 
     // Collect file arg, skipping --theme and its value.
     let file_arg = {
@@ -187,11 +199,10 @@ fn restore_termios(saved: &libc::termios) {
     }
 }
 
-fn resolve_theme(cli: Option<&str>, config: Option<&str>) -> theme::Theme {
-    let value = cli.or(config).unwrap_or("auto");
-    match value {
-        "dark" => theme::Theme::Dark,
-        "light" => theme::Theme::Light,
-        _ => theme::detect(),
+fn resolve_theme(cli: Option<ThemeChoice>, config: Option<ThemeChoice>) -> theme::Theme {
+    match cli.or(config).unwrap_or(ThemeChoice::Auto) {
+        ThemeChoice::Dark => theme::Theme::Dark,
+        ThemeChoice::Light => theme::Theme::Light,
+        ThemeChoice::Auto => theme::detect(),
     }
 }

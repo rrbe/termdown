@@ -52,7 +52,7 @@ struct DocEntry {
     toc_open: bool,
     /// Whether the frontmatter metadata block (if any) is shown expanded as an
     /// inline box. Default `false` = folded one-line summary. Toggled by the
-    /// `m` key. Has no effect when `config.metadata.show` is false.
+    /// `m` key. Has no effect when `config.metadata` is `Some(false)`.
     metadata_expanded: bool,
 }
 
@@ -295,7 +295,7 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             size.width
         };
         app.term_size = (size.width, body_height);
-        let show_metadata = app.config.metadata.show;
+        let show_metadata = app.config.metadata.unwrap_or(true);
         {
             let active = app.active_mut();
             if active.viewport.width != body_width || active.viewport.height != body_height {
@@ -469,7 +469,7 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             }
             // No-op when metadata display is disabled — toggling would only
             // churn the wrap cache and force a redraw with no visible change.
-            input::Action::ToggleMetadata if app.config.metadata.show => {
+            input::Action::ToggleMetadata if app.config.metadata.unwrap_or(true) => {
                 let active = app.active_mut();
                 if active.doc.metadata.is_some() {
                     active.metadata_expanded = !active.metadata_expanded;
