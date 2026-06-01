@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # gen-large-fixture.sh — produce fixtures/specialized/large.md, a stress/perf
-# fixture for termdown. Output is deterministic (no $RANDOM, no timestamps)
-# so a clean re-run produces an identical file and `git diff` is meaningful.
+# fixture for termdown. The output is gitignored and never committed: generate
+# it on demand, perf-test, then delete it (see docs/TESTING.md). Output is
+# deterministic (no $RANDOM, no timestamps), so a clean re-run is byte-identical.
 #
 # Usage:
+#   make large-fixture        # writes fixtures/specialized/large.md
 #   ./scripts/gen-large-fixture.sh > fixtures/specialized/large.md
 #
 # Shape: 1 H1 + 500 H2 sections, every 50th sections is followed by an extra
@@ -20,9 +22,10 @@ TAIL_TABLE_ROWS="${TAIL_TABLE_ROWS:-200}"
 cat <<'HEADER'
 # Large Fixture — Stress / Performance Baseline
 
-This file is **generated** by `scripts/gen-large-fixture.sh`. Do not hand-edit;
-re-run the script and commit the diff. It exists to give us a manual baseline
-for "does termdown stay snappy on a 200 KB / 10k-line document?" — it is **not**
+This file is **generated** by `scripts/gen-large-fixture.sh` and is
+**gitignored** — do not hand-edit or commit it. Re-generate on demand
+(`make large-fixture`) and delete it when done. It is a manual baseline for
+"does termdown stay snappy on a 200 KB / 10k-line document?" — it is **not**
 wired into the snapshot tests.
 
 HEADER

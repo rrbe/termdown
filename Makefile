@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check lint test build build-release check all coverage coverage-html coverage-lcov
+.PHONY: help fmt fmt-check lint test build build-release check all coverage coverage-html coverage-lcov large-fixture
 
 CARGO ?= cargo
 
@@ -15,6 +15,7 @@ help:
 	@echo "  coverage      - test coverage summary in the terminal (cargo-llvm-cov)"
 	@echo "  coverage-html - generate an HTML coverage report under target/llvm-cov/html"
 	@echo "  coverage-lcov - emit lcov.info for external tooling"
+	@echo "  large-fixture - (re)generate the gitignored stress fixture for manual perf runs (see docs/TESTING.md)"
 
 fmt:
 	$(CARGO) fmt --all
@@ -46,3 +47,7 @@ coverage-html:
 
 coverage-lcov:
 	$(CARGO) llvm-cov --all-targets --lcov --output-path lcov.info
+
+large-fixture:
+	./scripts/gen-large-fixture.sh > fixtures/specialized/large.md
+	@echo "Generated fixtures/specialized/large.md (gitignored). Remove it when done perf-testing: rm fixtures/specialized/large.md"
