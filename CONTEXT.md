@@ -8,6 +8,23 @@ vocabulary** here.
 
 ## Glossary
 
+### File Browser
+The interactive **filesystem** panel that scans a directory for Markdown files
+and lets the user switch between them inside the TUI (inspired by yazi). A left
+side panel coexisting with the reader. **Never call this "目录"** — see
+[[Contents (ToC)]] for the collision. The user-facing word is **File Browser**;
+in Chinese, **文件浏览器**.
+
+Status: proposed, not yet built. Reserve the name now so it can't drift.
+
+### Contents (ToC)
+The heading-outline side panel toggled by `t`, titled `"Contents"`, built from
+the active document's `RenderedDoc.headings`. In casual Chinese this is often
+called "目录", which **collides** with the filesystem sense used by the
+[[File Browser]]. In this project: **Contents / ToC = headings of one document**;
+**File Browser = files on disk**. They are different panels with different data
+sources; do not conflate them in code, docs, or conversation.
+
 ### Frontmatter
 A block of metadata written at the **very beginning** of a Markdown file, fenced
 by either `---` (YAML syntax) or `+++` (TOML syntax). Used by static site

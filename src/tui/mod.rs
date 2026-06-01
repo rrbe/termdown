@@ -1,5 +1,6 @@
 //! Interactive TUI mode.
 
+mod browser;
 mod input;
 mod kitty;
 mod search;
@@ -7,7 +8,12 @@ mod viewport;
 
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::time::Duration;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use browser::FileBrowser;
 
 use crossterm::event::{self, Event};
 use crossterm::terminal::{
@@ -28,6 +34,79 @@ use viewport::Viewport;
 
 /// Width of the Table-of-Contents side panel when it is open.
 const TOC_PANEL_WIDTH: u16 = 30;
+
+/// Width of the File Browser side panel (the filesystem file list).
+const BROWSER_PANEL_WIDTH: u16 = 32;
+
+/// How long the cursor must sit still in the File Browser before we dispatch a
+/// preview build. Fast scrolling never triggers a build; the preview is only
+/// requested once the selection settles. See `feat/file-browser`.
+const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(120);
+
+/// A request to the preview worker: build the doc at `path`, tagged with the
+/// `generation` that was current when it was dispatched.
+struct PreviewRequest {
+    generation: u64,
+    path: PathBuf,
+}
+
+/// A finished preview build coming back from the worker. `doc` is `None` if the
+/// file couldn't be read. `generation` lets the main thread discard results
+/// whose selection has since moved on.
+struct PreviewResponse {
+    generation: u64,
+    path: PathBuf,
+    doc: Option<layout::RenderedDoc>,
+}
+
+/// Off-thread Markdown builder for the File Browser. Heading-image
+/// rasterization (the dominant per-doc cost) runs here so the event loop never
+/// blocks on a settle. The worker coalesces queued requests — if several pile
+/// up it only builds the most recent — and the main thread additionally drops
+/// any result whose `generation` is stale. The worker exits when the request
+/// channel closes (i.e. when `App`/`PreviewWorker` is dropped at TUI teardown).
+struct PreviewWorker {
+    req_tx: mpsc::Sender<PreviewRequest>,
+    res_rx: mpsc::Receiver<PreviewResponse>,
+}
+
+impl PreviewWorker {
+    fn spawn(config: Config, theme: Theme) -> Self {
+        let (req_tx, req_rx) = mpsc::channel::<PreviewRequest>();
+        let (res_tx, res_rx) = mpsc::channel::<PreviewResponse>();
+        thread::spawn(move || {
+            while let Ok(mut req) = req_rx.recv() {
+                // Coalesce: if the cursor raced ahead and queued newer
+                // requests, skip straight to the latest and drop the rest.
+                while let Ok(newer) = req_rx.try_recv() {
+                    req = newer;
+                }
+                let doc = std::fs::read_to_string(&req.path)
+                    .ok()
+                    .map(|src| layout::build(&src, &config, theme));
+                if res_tx
+                    .send(PreviewResponse {
+                        generation: req.generation,
+                        path: req.path,
+                        doc,
+                    })
+                    .is_err()
+                {
+                    break; // main thread gone
+                }
+            }
+        });
+        PreviewWorker { req_tx, res_rx }
+    }
+
+    fn request(&self, generation: u64, path: PathBuf) {
+        let _ = self.req_tx.send(PreviewRequest { generation, path });
+    }
+
+    fn try_recv(&self) -> Option<PreviewResponse> {
+        self.res_rx.try_recv().ok()
+    }
+}
 
 enum Mode {
     Normal,
@@ -82,6 +161,26 @@ struct App {
     /// that may leave stale terminal cells behind (scroll, toc toggle, doc
     /// switch, resize).
     needs_full_redraw: bool,
+    /// File Browser state, present when termdown was pointed at a directory.
+    /// `None` for the plain single-file reader. Survives a commit so the
+    /// browser can be re-opened later (HALF 2).
+    browser: Option<FileBrowser>,
+    /// True while the File Browser panel is showing and holds focus (Browse
+    /// mode). False = Read mode (the normal full-screen reader).
+    browsing: bool,
+    /// The ephemeral preview document for the browser's current selection.
+    /// Rebuilt on settle; never enters the `docs` history stack until the user
+    /// commits it with Enter.
+    preview: Option<DocEntry>,
+    /// Background Markdown builder for previews. `None` for the single-file
+    /// reader.
+    preview_worker: Option<PreviewWorker>,
+    /// Monotonic "latest browser interaction" id. Bumped on every cursor move
+    /// so an in-flight build whose generation no longer matches is discarded.
+    preview_gen: u64,
+    /// The generation we have already dispatched a build for, so we don't
+    /// re-request the same selection every loop iteration while it builds.
+    dispatched_gen: u64,
 }
 
 impl App {
@@ -107,9 +206,51 @@ impl App {
             theme,
             cell_px_height: 0,
             needs_full_redraw: true,
+            browser: None,
+            browsing: false,
+            preview: None,
+            preview_worker: None,
+            preview_gen: 0,
+            dispatched_gen: 0,
         };
         app.push_new_doc(path, doc);
         app
+    }
+
+    /// Construct an App that opens directly into the File Browser (Browse
+    /// mode) with no committed document yet. The first event-loop iteration
+    /// builds the preview for the first file.
+    fn new_browser(
+        browser: FileBrowser,
+        body_height: u16,
+        width: u16,
+        config: crate::config::Config,
+        theme: crate::theme::Theme,
+    ) -> Self {
+        let worker = PreviewWorker::spawn(config.clone(), theme);
+        App {
+            docs: Vec::new(),
+            cursor: 0,
+            history: Vec::new(),
+            forward: Vec::new(),
+            mode: Mode::Normal,
+            images: kitty::ImageLifecycle::default(),
+            next_image_id: 1,
+            term_size: (width, body_height),
+            should_quit: false,
+            config,
+            theme,
+            cell_px_height: 0,
+            needs_full_redraw: true,
+            browser: Some(browser),
+            browsing: true,
+            preview: None,
+            preview_worker: Some(worker),
+            // Start at 1 with dispatched_gen 0 so the first selection is
+            // eligible to dispatch on the very first iteration.
+            preview_gen: 1,
+            dispatched_gen: 0,
+        }
     }
 
     fn active(&self) -> &DocEntry {
@@ -125,33 +266,7 @@ impl App {
     /// that point at them) from the global allocator so ids never collide
     /// across docs in a single session.
     fn push_new_doc(&mut self, path: String, mut doc: layout::RenderedDoc) -> usize {
-        let offset = self.next_image_id;
-        // layout::build() assigns ids starting at 1; shift each by (offset - 1)
-        // so the first image of this doc becomes `offset`.
-        let mut id_map: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-        for img in &mut doc.images {
-            let new_id = offset + (img.id - 1);
-            id_map.insert(img.id, new_id);
-            img.id = new_id;
-        }
-        if let Some(max) = doc.images.iter().map(|i| i.id).max() {
-            self.next_image_id = max + 1;
-        }
-        // Patch Span::HeadingImage and LineKind::Heading { id } references.
-        for line in &mut doc.lines {
-            for span in &mut line.spans {
-                if let layout::Span::HeadingImage { id, .. } = span {
-                    if let Some(&new) = id_map.get(id) {
-                        *id = new;
-                    }
-                }
-            }
-            if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
-                if let Some(&new) = id_map.get(hid) {
-                    *hid = new;
-                }
-            }
-        }
+        renumber_doc_ids(&mut doc, &mut self.next_image_id);
         let (width, height) = self.term_size;
         let viewport = Viewport::new(height, width);
         let mut entry = DocEntry {
@@ -183,6 +298,19 @@ impl App {
             .iter()
             .map(|i| (i.id, i.png.clone()))
             .collect();
+        for (id, png) in &doc_images {
+            self.images.register(w, *id, png)?;
+        }
+        Ok(())
+    }
+
+    /// Transmit the current preview doc's images (Browse mode). No-op when no
+    /// preview is built yet.
+    fn register_preview_images<W: Write>(&mut self, w: &mut W) -> io::Result<()> {
+        let doc_images: Vec<(u32, Vec<u8>)> = match &self.preview {
+            Some(p) => p.doc.images.iter().map(|i| (i.id, i.png.clone())).collect(),
+            None => return Ok(()),
+        };
         for (id, png) in &doc_images {
             self.images.register(w, *id, png)?;
         }
@@ -240,6 +368,168 @@ pub fn run(path: &str, config: &Config, theme: Theme) {
     }
 }
 
+/// Entry point for `termdown <dir>` — open the File Browser on a directory.
+pub fn run_browser(dir: &str, config: &Config, theme: Theme) {
+    let browser = match FileBrowser::scan(std::path::Path::new(dir)) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("termdown: error reading directory {dir}: {e}");
+            std::process::exit(1);
+        }
+    };
+    if browser.entries.is_empty() {
+        eprintln!("termdown: no Markdown files found in {dir}");
+        std::process::exit(1);
+    }
+    if let Err(e) = run_browser_ui(browser, config.clone(), theme) {
+        eprintln!("termdown: tui error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run_browser_ui(browser: FileBrowser, config: Config, theme: Theme) -> io::Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    let size = terminal.size()?;
+    let body_height = size.height.saturating_sub(1);
+    let mut app = App::new_browser(browser, body_height, size.width, config, theme);
+    app.cell_px_height = query_cell_px_height();
+
+    let result = event_loop(&mut terminal, &mut app);
+
+    {
+        let mut out = io::stdout().lock();
+        let _ = app.images.cleanup(&mut out);
+        let _ = out.flush();
+    }
+
+    disable_raw_mode()?;
+    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+    result
+}
+
+/// Shift all heading-image ids in `doc` so they start at `*next_image_id`,
+/// then advance the allocator past them. Patches both `Span::HeadingImage` and
+/// `LineKind::Heading { id }` references. Shared by the history stack
+/// (`push_new_doc`) and the ephemeral browser preview so ids never collide
+/// across docs in one session.
+fn renumber_doc_ids(doc: &mut layout::RenderedDoc, next_image_id: &mut u32) {
+    let offset = *next_image_id;
+    // layout::build() assigns ids starting at 1; shift each by (offset - 1)
+    // so the first image of this doc becomes `offset`.
+    let mut id_map: HashMap<u32, u32> = HashMap::new();
+    for img in &mut doc.images {
+        let new_id = offset + (img.id - 1);
+        id_map.insert(img.id, new_id);
+        img.id = new_id;
+    }
+    if let Some(max) = doc.images.iter().map(|i| i.id).max() {
+        *next_image_id = max + 1;
+    }
+    for line in &mut doc.lines {
+        for span in &mut line.spans {
+            if let layout::Span::HeadingImage { id, .. } = span {
+                if let Some(&new) = id_map.get(id) {
+                    *id = new;
+                }
+            }
+        }
+        if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
+            if let Some(&new) = id_map.get(hid) {
+                *hid = new;
+            }
+        }
+    }
+}
+
+/// True when the highlighted file differs from the one the current preview was
+/// built for — i.e. a build is pending/in-flight and the pane should show a
+/// loading indicator rather than stale content or images.
+fn browse_selection_pending(app: &App) -> bool {
+    match app.browser.as_ref() {
+        Some(b) => {
+            let sel = b.selected();
+            sel.is_some() && sel != b.preview_path.as_ref()
+        }
+        None => false,
+    }
+}
+
+/// Adopt a finished preview build from the worker: renumber ids onto the global
+/// allocator, refine image rows to the real cell height, transmit the PNGs, and
+/// mark this path as the one currently shown. A read error (`doc == None`)
+/// clears the preview but still records the path so the pane shows the
+/// "unreadable" message instead of a perpetual spinner.
+fn accept_preview(app: &mut App, resp: PreviewResponse) {
+    let (term_width, body_height) = app.term_size;
+    let body_width = term_width.saturating_sub(BROWSER_PANEL_WIDTH);
+
+    // Reap the outgoing preview's image data first — it's ephemeral (never
+    // committed; commit takes `app.preview` via `take()` so we never reach here
+    // for a kept doc) and would otherwise stay cached in the terminal.
+    let stale_ids: Vec<u32> = app
+        .preview
+        .as_ref()
+        .map(|p| p.doc.images.iter().map(|i| i.id).collect())
+        .unwrap_or_default();
+    if !stale_ids.is_empty() {
+        let mut out = io::stdout().lock();
+        let _ = app.images.forget(&mut out, &stale_ids);
+        let _ = out.flush();
+    }
+
+    match resp.doc {
+        Some(mut doc) => {
+            renumber_doc_ids(&mut doc, &mut app.next_image_id);
+            refine_image_rows(&mut doc, app.cell_px_height);
+            app.preview = Some(DocEntry {
+                path: resp.path.display().to_string(),
+                doc,
+                viewport: Viewport::new(body_height, body_width),
+                search: None,
+                pending_g: false,
+                toc_open: false,
+                metadata_expanded: false,
+            });
+            let mut out = io::stdout().lock();
+            let _ = app.register_preview_images(&mut out);
+            let _ = out.flush();
+        }
+        None => {
+            app.preview = None;
+        }
+    }
+
+    if let Some(b) = app.browser.as_mut() {
+        b.preview_path = Some(resp.path);
+    }
+}
+
+/// Synchronously build a `DocEntry` for `path` (used on commit when the async
+/// preview isn't ready yet — a one-off blocking build on a deliberate Enter is
+/// acceptable). Returns `None` if the file can't be read.
+fn build_doc_entry_sync(app: &mut App, path: &std::path::Path) -> Option<DocEntry> {
+    let (term_width, body_height) = app.term_size;
+    let body_width = term_width.saturating_sub(BROWSER_PANEL_WIDTH);
+    let src = std::fs::read_to_string(path).ok()?;
+    let mut doc = layout::build(&src, &app.config, app.theme);
+    renumber_doc_ids(&mut doc, &mut app.next_image_id);
+    refine_image_rows(&mut doc, app.cell_px_height);
+    Some(DocEntry {
+        path: path.display().to_string(),
+        doc,
+        viewport: Viewport::new(body_height, body_width),
+        search: None,
+        pending_g: false,
+        toc_open: false,
+        metadata_expanded: false,
+    })
+}
+
 fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -289,14 +579,58 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
         // wrap cache (`ensure_wrap` re-wraps when `self.width != cache_width`).
         let size = terminal.size()?;
         let body_height = size.height.saturating_sub(1);
-        let body_width = if app.active().toc_open {
-            size.width.saturating_sub(TOC_PANEL_WIDTH)
-        } else {
-            size.width
-        };
         app.term_size = (size.width, body_height);
         let show_metadata = app.config.metadata.unwrap_or(true);
-        {
+
+        if app.browsing {
+            // 1. Adopt any finished builds, discarding ones the cursor has
+            //    since moved past (stale generation).
+            let mut accepted: Vec<PreviewResponse> = Vec::new();
+            if let Some(worker) = app.preview_worker.as_ref() {
+                while let Some(resp) = worker.try_recv() {
+                    if resp.generation == app.preview_gen {
+                        accepted.push(resp);
+                    }
+                }
+            }
+            // Only the newest accepted result matters; drop the rest.
+            if let Some(resp) = accepted.pop() {
+                accept_preview(app, resp);
+            }
+
+            // 2. Dispatch a build once the selection settles (debounced) and we
+            //    haven't already requested this generation.
+            let (sel, settled) = match app.browser.as_ref() {
+                Some(b) => (
+                    b.selected().cloned(),
+                    b.last_move.is_none_or(|t| t.elapsed() >= PREVIEW_DEBOUNCE),
+                ),
+                None => (None, false),
+            };
+            if settled && app.dispatched_gen != app.preview_gen && browse_selection_pending(app) {
+                // Mark this generation dispatched before borrowing the worker so
+                // we never re-request it; one build per settle.
+                let gen = app.preview_gen;
+                app.dispatched_gen = gen;
+                if let (Some(worker), Some(path)) = (app.preview_worker.as_ref(), sel) {
+                    worker.request(gen, path);
+                }
+            }
+
+            // 3. Size the preview viewport (only meaningful when one is shown).
+            let body_width = size.width.saturating_sub(BROWSER_PANEL_WIDTH);
+            if let Some(p) = app.preview.as_mut() {
+                p.viewport.width = body_width;
+                p.viewport.height = body_height;
+                let expanded = p.metadata_expanded;
+                p.viewport.ensure_wrap(&p.doc, show_metadata, expanded);
+            }
+        } else {
+            let body_width = if app.active().toc_open {
+                size.width.saturating_sub(TOC_PANEL_WIDTH)
+            } else {
+                size.width
+            };
             let active = app.active_mut();
             if active.viewport.width != body_width || active.viewport.height != body_height {
                 active.viewport.width = body_width;
@@ -324,21 +658,45 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             app.images.reset_transmissions();
             let mut out = io::stdout().lock();
             let _ = app.images.reset_placements(&mut out);
-            let _ = app.register_active_images(&mut out);
+            if app.browsing {
+                let _ = app.register_preview_images(&mut out);
+            } else {
+                let _ = app.register_active_images(&mut out);
+            }
             let _ = out.flush();
             app.needs_full_redraw = false;
         }
 
-        terminal.draw(|frame| draw(frame, app))?;
+        if app.browsing {
+            terminal.draw(|frame| draw_browse(frame, app))?;
+        } else {
+            terminal.draw(|frame| draw(frame, app))?;
+        }
+
+        // While a preview is still loading (selection differs from the shown
+        // doc) we place no images — the pane shows a spinner, not stale art.
+        let browse_pending = app.browsing && browse_selection_pending(app);
 
         {
             let mut stdout = io::stdout().lock();
-            let desired = desired_image_placements(app);
+            let desired = if app.browsing {
+                match (browse_pending, app.preview.as_ref()) {
+                    (false, Some(p)) => {
+                        placements_for(p, BROWSER_PANEL_WIDTH, p.viewport.height, None)
+                    }
+                    _ => HashMap::new(),
+                }
+            } else {
+                desired_image_placements(app)
+            };
             let _ = app.images.sync(&mut stdout, &desired);
             let _ = stdout.flush();
         }
 
-        if event::poll(Duration::from_millis(50))? {
+        // Poll faster while a build is in flight so the finished preview pops in
+        // promptly; idle otherwise to keep CPU low.
+        let poll_ms = if browse_pending { 16 } else { 50 };
+        if event::poll(Duration::from_millis(poll_ms))? {
             let ev = event::read()?;
             // Resize is the one event crossterm surfaces that must trigger a
             // full redraw regardless of mode.
@@ -346,11 +704,15 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
                 app.needs_full_redraw = true;
                 continue;
             }
-            match &mut app.mode {
-                Mode::Normal => handle_normal_key(app, &ev)?,
-                Mode::Search { .. } => handle_search_key(app, ev)?,
-                Mode::LinkSelect { .. } => handle_link_select_key(app, ev)?,
-                Mode::Help => handle_help_key(app, ev)?,
+            if app.browsing {
+                handle_browse_key(app, &ev);
+            } else {
+                match &mut app.mode {
+                    Mode::Normal => handle_normal_key(app, &ev)?,
+                    Mode::Search { .. } => handle_search_key(app, ev)?,
+                    Mode::LinkSelect { .. } => handle_link_select_key(app, ev)?,
+                    Mode::Help => handle_help_key(app, ev)?,
+                }
             }
             if app.should_quit {
                 return Ok(());
@@ -364,6 +726,92 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             // every heading PNG.
         }
     }
+}
+
+/// Key handling while the File Browser holds focus (Browse mode).
+fn handle_browse_key(app: &mut App, ev: &Event) {
+    let Event::Key(key) = ev else {
+        return;
+    };
+    if key.kind != event::KeyEventKind::Press {
+        return;
+    }
+    let ctrl = key.modifiers.contains(event::KeyModifiers::CONTROL);
+    match key.code {
+        event::KeyCode::Char('q') => app.should_quit = true,
+        event::KeyCode::Char('c') if ctrl => app.should_quit = true,
+        event::KeyCode::Char('j') | event::KeyCode::Down => browse_move(app, 1),
+        event::KeyCode::Char('k') | event::KeyCode::Up => browse_move(app, -1),
+        event::KeyCode::Enter => browse_commit(app),
+        event::KeyCode::Esc => {
+            // No committed doc to return to (launched straight into the
+            // browser) → quit; otherwise drop back to the reader.
+            if app.docs.is_empty() {
+                app.should_quit = true;
+            } else {
+                app.browsing = false;
+                app.needs_full_redraw = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Move the browser cursor by `delta`, clamped to the list bounds. Records the
+/// move time (for debounce) and bumps the generation so any in-flight build for
+/// the previous selection is discarded when it returns.
+fn browse_move(app: &mut App, delta: i32) {
+    let moved = if let Some(b) = app.browser.as_mut() {
+        if b.entries.is_empty() {
+            false
+        } else {
+            let len = b.entries.len() as i32;
+            let next = (b.cursor as i32 + delta).clamp(0, len - 1) as usize;
+            if next != b.cursor {
+                b.cursor = next;
+                b.last_move = Some(Instant::now());
+                true
+            } else {
+                false
+            }
+        }
+    } else {
+        false
+    };
+    if moved {
+        app.preview_gen += 1;
+    }
+}
+
+/// Commit the selected file: reuse its preview if the async build already
+/// landed, otherwise build it synchronously now (a one-off blocking build on a
+/// deliberate Enter is acceptable). Then move it onto the history stack as the
+/// active document and leave Browse mode.
+fn browse_commit(app: &mut App) {
+    let Some(sel) = app.browser.as_ref().and_then(|b| b.selected().cloned()) else {
+        return;
+    };
+    let preview_ready = !browse_selection_pending(app) && app.preview.is_some();
+    let entry = if preview_ready {
+        app.preview.take().expect("preview_ready implies Some")
+    } else {
+        match build_doc_entry_sync(app, &sel) {
+            Some(e) => e,
+            None => return, // unreadable file — stay in the browser
+        }
+    };
+    if !app.docs.is_empty() {
+        app.history.push(app.cursor);
+    }
+    app.forward.clear();
+    app.docs.push(entry);
+    app.cursor = app.docs.len() - 1;
+    app.browsing = false;
+    // Forget the preview tracking so re-opening the browser rebuilds it.
+    if let Some(b) = app.browser.as_mut() {
+        b.preview_path = None;
+    }
+    app.needs_full_redraw = true;
 }
 
 /// Apply a scroll delta and ring the edge bell if the viewport didn't budge.
@@ -950,31 +1398,23 @@ fn clipped_spans(
     out
 }
 
-fn draw(frame: &mut ratatui::Frame, app: &App) {
-    use ratatui::layout::{Constraint, Direction, Layout};
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(frame.area());
-
-    let active = app.active();
-
-    // Body
+/// Render one document's visible region into ratatui lines. Shared by the
+/// full-screen reader (`draw`) and the File Browser preview (`draw_browse`).
+fn render_doc_body(entry: &DocEntry, theme: Theme) -> Vec<RLine<'static>> {
     // Precompute the current-match identity for "is this the current one" checks.
-    let current_logical: Option<(usize, usize)> = active.search.as_ref().and_then(|s| {
+    let current_logical: Option<(usize, usize)> = entry.search.as_ref().and_then(|s| {
         s.current.map(|i| {
             let m = &s.matches[i];
             (m.line_index, m.byte_range.start)
         })
     });
 
-    let mut rendered: Vec<RLine> = Vec::new();
-    for vl in active.viewport.visible() {
+    let mut rendered: Vec<RLine<'static>> = Vec::new();
+    for vl in entry.viewport.visible() {
         if let Some(role) = vl.metadata_row {
-            let body_cols = active.viewport.width as usize;
+            let body_cols = entry.viewport.width as usize;
             rendered.push(render_metadata_row(
-                active
+                entry
                     .doc
                     .metadata
                     .as_ref()
@@ -991,22 +1431,131 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
         // indexing `doc.lines` so the metadata block's trailing blank (whose
         // `logical_index` is a sentinel) never dereferences a real line.
         if vl.is_spacer {
-            rendered.push(RLine::from(Vec::<RSpan>::new()));
+            rendered.push(RLine::from(Vec::<RSpan<'static>>::new()));
             continue;
         }
 
-        let logical = &active.doc.lines[vl.logical_index];
+        let logical = &entry.doc.lines[vl.logical_index];
 
         let matches = visible_matches_for_line(
-            active.search.as_ref(),
+            entry.search.as_ref(),
             vl.logical_index,
             vl.byte_start,
             vl.byte_end,
             current_logical,
         );
-        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches, app.theme);
+        let rspans = clipped_spans(logical, vl.byte_start, vl.byte_end, &matches, theme);
         rendered.push(RLine::from(rspans));
     }
+    rendered
+}
+
+/// Render the File Browser: file-list panel on the left, live preview on the
+/// right, status row at the bottom.
+fn draw_browse(frame: &mut ratatui::Frame, app: &App) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::style::{Modifier, Style as RStyle};
+    use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(frame.area());
+
+    let split = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(BROWSER_PANEL_WIDTH), Constraint::Min(20)])
+        .split(chunks[0]);
+
+    let Some(browser) = app.browser.as_ref() else {
+        return;
+    };
+
+    // File list panel.
+    let items: Vec<ListItem> = (0..browser.entries.len())
+        .map(|i| ListItem::new(browser.name_at(i)))
+        .collect();
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::RIGHT).title(" Files "))
+        .highlight_style(RStyle::default().add_modifier(Modifier::REVERSED));
+    let mut state = ListState::default();
+    if !browser.entries.is_empty() {
+        state.select(Some(browser.cursor));
+    }
+    frame.render_stateful_widget(list, split[0], &mut state);
+
+    // Preview pane. While the selection is still building (async), show a
+    // spinner instead of stale content; otherwise the rendered doc, or an
+    // "unreadable" note if the build came back empty.
+    let dim = RStyle::default().add_modifier(Modifier::DIM);
+    if browse_selection_pending(app) {
+        let msg = RLine::from(RSpan::styled("  ⟳ 加载中…", dim));
+        frame.render_widget(Paragraph::new(msg), split[1]);
+    } else {
+        match app.preview.as_ref() {
+            Some(entry) => {
+                let rendered = render_doc_body(entry, app.theme);
+                frame.render_widget(Paragraph::new(rendered), split[1]);
+            }
+            None => {
+                let msg = RLine::from(RSpan::styled("  (无法读取该文件)", dim));
+                frame.render_widget(Paragraph::new(msg), split[1]);
+            }
+        }
+    }
+
+    render_browse_status(frame, chunks[1], app);
+}
+
+/// Status row for Browse mode: directory + position.
+fn render_browse_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &App) {
+    use ratatui::style::Style as RStyle;
+    use ratatui::widgets::Paragraph;
+    use unicode_width::UnicodeWidthStr;
+
+    let total = area.width as usize;
+    if total == 0 {
+        return;
+    }
+    let Some(browser) = app.browser.as_ref() else {
+        return;
+    };
+
+    let (bg, fg) = status_colors(app.theme);
+    let style = RStyle::default().bg(bg).fg(fg);
+
+    let dir = browser.dir.display().to_string();
+    let pos = if browser.entries.is_empty() {
+        "0/0".to_string()
+    } else {
+        format!("{}/{}", browser.cursor + 1, browser.entries.len())
+    };
+    let right = format!(" {pos} ");
+    let left = format!(" {dir} ");
+    let used = left.width() + right.width();
+    let pad = total.saturating_sub(used);
+    let line = if used <= total {
+        format!("{left}{}{right}", " ".repeat(pad))
+    } else {
+        // Tight: middle-truncate the dir, keep the position.
+        let max_dir = total.saturating_sub(right.width() + 2);
+        let t = truncate_middle(&dir, max_dir);
+        format!(" {t} {right}")
+    };
+    frame.render_widget(Paragraph::new(line).style(style), area);
+}
+
+fn draw(frame: &mut ratatui::Frame, app: &App) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(frame.area());
+
+    let active = app.active();
+
+    let rendered = render_doc_body(active, app.theme);
 
     let body_area = if active.toc_open {
         let split = ratatui::layout::Layout::default()
@@ -1431,16 +1980,29 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     } else {
         None
     };
+    placements_for(active, col_offset, active.viewport.height, popup_rows)
+}
+
+/// Compute the desired `id → (col, row)` heading-image placement map for one
+/// document's visible region. `col_offset` shifts images past a left panel
+/// (ToC or File Browser); `popup_rows`, if set, suppresses images overlapping
+/// the help popup. Shared by the reader and the browser preview.
+fn placements_for(
+    entry: &DocEntry,
+    col_offset: u16,
+    body_height: u16,
+    popup_rows: Option<(u16, u16)>,
+) -> HashMap<u32, (u16, u16)> {
     let mut out = HashMap::new();
     // wrap_all emits one VisualLine per screen row (headings expand into
     // N rows: main + spacers), so visual_row just increments by 1 each
     // iteration and matches the row count used by draw() + the viewport.
-    let body_height = active.viewport.height;
-    for (visual_row, vl) in active.viewport.visible().iter().enumerate() {
-        if vl.is_spacer || vl.byte_start != 0 {
+    for (visual_row, vl) in entry.viewport.visible().iter().enumerate() {
+        // Metadata rows carry a sentinel logical_index and never hold images.
+        if vl.metadata_row.is_some() || vl.is_spacer || vl.byte_start != 0 {
             continue;
         }
-        let logical = &active.doc.lines[vl.logical_index];
+        let logical = &entry.doc.lines[vl.logical_index];
         let vr = visual_row as u16;
         for span in &logical.spans {
             if let layout::Span::HeadingImage { id, rows } = span {
