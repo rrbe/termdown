@@ -31,13 +31,15 @@ developer's own config can't leak in.
 
 ### Regenerating snapshots
 
-When a rendering change is intentional, the snapshot test fails and writes the
-*actual* output to a temp file, printing both paths. Review the diff
-intent-first, then accept it by copying the temp file over the expected one,
-e.g.:
+When a rendering change is intentional, the snapshot test fails and prints two
+paths: the expected `.ansi` file and a temp file holding the *actual* output
+(`actual written to: …` — the exact temp dir is OS-dependent). Review the diff
+intent-first, then accept it by copying the printed temp path over the expected
+file:
 
 ```sh
-cp "$TMPDIR/termdown-snapshot-supported-syntax.ansi" fixtures/expected/supported-syntax.ansi
+# use the exact path the test printed after "actual written to:"
+cp <printed-temp-path> fixtures/expected/supported-syntax.ansi
 make test   # confirm green
 ```
 
