@@ -6,8 +6,8 @@
 
 <table>
 <tr>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown 渲染中文 README" /></td>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown 在 TUI 模式下渲染英文 README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/master/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown 渲染中文 README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/master/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown 在 TUI 模式下渲染英文 README" /></td>
 </tr>
 </table>
 
