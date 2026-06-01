@@ -14,7 +14,6 @@ rust-version = "1.95"
 exclude = [
     "CLAUDE.md",
     "TODO.md",
-    "TEST_PLAN.md",
     "docs/",
     ".github/",
     "install.sh",

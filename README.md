@@ -6,8 +6,8 @@ Render Markdown with large-font headings in the terminal using the Kitty graphic
 
 <table>
 <tr>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
-<td><img src="https://raw.githubusercontent.com/rrbe/termdown/v0.4.0/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown rendering the English README in TUI mode" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/master/docs/screenshots/termdown_render_cn_demo.png" width="380" alt="termdown rendering the Chinese README" /></td>
+<td><img src="https://raw.githubusercontent.com/rrbe/termdown/master/docs/screenshots/termdown_render_en_tui_demo.png" width="380" alt="termdown rendering the English README in TUI mode" /></td>
 </tr>
 </table>
 
@@ -87,111 +87,16 @@ rm -rf ~/.config/termdown
 # Open a file in the interactive TUI (default)
 termdown README.md
 
-# Force plain cat-style output (non-interactive, pipe-friendly)
+# Plain cat-style output (non-interactive, pipe-friendly)
 termdown --cat README.md
-
-# Pipe from stdin (always cat-style — TUI needs a real file)
 cat notes.md | termdown
 
-# Piped or redirected stdout also falls back to cat
-termdown README.md | less
-
-# Use a specific theme instead of auto-detect
+# Pick a theme; show help
 termdown --theme light README.md
-
-# Disable the edge-scroll bell (also configurable via `bell = false`)
-termdown --no-bell README.md
-
-# View help
 termdown --help
-termdown --version
 ```
 
-### TUI mode
-
-The TUI launches automatically whenever you pass a file and stdout is a real
-terminal:
-
-```sh
-termdown README.md
-```
-
-Key bindings:
-
-| Key | Action |
-|---|---|
-| `j` / `↓` | Scroll down one line |
-| `k` / `↑` | Scroll up one line |
-| `d` / `u` | Half page down / up |
-| `f` / `Space` / `PgDn` | Full page down |
-| `b` / `PgUp` | Full page up |
-| `gg` / `G` | Jump to start / end |
-| `]` / `[` | Next / previous heading |
-| `t` | Toggle Table of Contents panel |
-| `/` | Search forward |
-| `n` / `N` | Next / previous match |
-| `?` | Toggle keyboard-shortcut help overlay |
-| `Enter` | Follow link (overlay picker if multiple visible) |
-| `o` / `i` | Back / forward across followed `.md` links |
-| `q` / `Ctrl-C` | Quit |
-
-TUI mode requires a file path; stdin input is not supported.
-
-## Configuration
-
-termdown reads configuration from `~/.config/termdown/config.toml` (or
-`$XDG_CONFIG_HOME/termdown/config.toml` if `XDG_CONFIG_HOME` is set). All
-settings are optional; see [`config.example.toml`](config.example.toml) for a
-copy-pasteable file with every default.
-
-```toml
-# Theme: "auto" (default), "dark", or "light"
-# Auto-detection queries the terminal background color via OSC 11.
-theme = "auto"
-
-# Vim-style edge bell: emit a terminal BEL when you scroll past the
-# top/bottom of the document. The terminal emulator decides the visible
-# effect (audible beep, title-bar 🔔, dock bounce, …). Default true.
-# CLI: `--no-bell`.
-bell = true
-
-[font.heading]
-# English heading font (sans-serif recommended)
-latin = "Inter"
-
-# CJK heading font
-cjk = "LXGW WenKai"
-
-# Emoji / symbol fallback font for image-rendered headings (optional)
-emoji = "Apple Color Emoji"
-```
-
-Headings with mixed scripts (e.g. "Hello 世界") will render each character with the appropriate font automatically.
-Standalone emoji in H1-H3 headings are also rendered via font fallback where possible.
-
-> **Note:** Body text is rendered as plain ANSI text -- its font is determined by your terminal emulator settings, not by termdown. To change the body font, configure your terminal directly.
-
-If no config file exists, termdown uses platform-specific defaults and falls back to an embedded SourceSerif4 font.
-
-### Platform default heading fonts
-
-**Latin** (sans-serif):
-
-| macOS | Linux | Windows |
-|-------|-------|---------|
-| Avenir | Inter | Segoe UI |
-| Avenir Next | Noto Sans | Arial |
-| Futura | DejaVu Sans | Verdana |
-| Helvetica Neue | Liberation Sans | |
-
-**CJK**:
-
-| macOS | Linux | Windows |
-|-------|-------|---------|
-| Noto Serif CJK SC | Noto Serif CJK SC | SimSun |
-| Source Han Serif SC | Source Han Serif SC | KaiTi |
-| Songti SC | Noto Serif | Microsoft YaHei |
-| STSong | DejaVu Serif | |
+The full CLI reference, TUI key bindings, configuration, and known issues live in the **[Usage Guide](docs/USAGE.md)**. Configuration is optional and lives at `~/.config/termdown/config.toml` -- see [`config.example.toml`](config.example.toml) for every default.
 
 ## Terminal Support
 
@@ -202,16 +107,7 @@ Requires a terminal with **Kitty graphics protocol** support:
 - [WezTerm](https://wezfurlong.org/wezterm/)
 - [iTerm2](https://iterm2.com)
 
-On unsupported terminals, termdown will print a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
-
-## Known Issues
-
-- **Line wrapping** -- long lines may not wrap correctly when mixed with ANSI escape sequences
-- **Terminal compatibility** -- only tested on Ghostty and iTerm2; other Kitty-protocol terminals may behave differently
-- **Font selection & fallback** -- weight matching relies on platform font APIs (Core Text / fontconfig) which may not always resolve to the expected variant
-- **Theme detection** -- auto-detection relies on OSC 11 terminal responses; if your terminal does not support this, use `--theme` or the config file to set the theme manually
-- **Complex emoji sequences** -- ZWJ-heavy emoji sequences (family/grouping variants, some skin-tone combinations) may still render as separate glyphs because heading layout does not perform full text shaping
-- **TUI help popup vs heading images** -- in TUI mode, the `?` help overlay is drawn on the text layer, while heading images live on Kitty's graphics layer (always on top of text). Any heading image overlapping the popup area is temporarily removed while the popup is open and restored when it closes -- this is a Kitty graphics protocol limitation, not a bug
+On unsupported terminals, termdown prints a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
 
 ## License
 

@@ -126,8 +126,8 @@ fn disable_echo() -> libc::termios {
 
 涉及文件：
 
-- `src/main.rs`：在 `markdown::render()` 前后管理 termios 状态
-- `src/render.rs`：`drain_kitty_responses()` 函数 + `q=2` 保留在协议序列中
+- `src/main.rs`：渲染（`layout::build` + `cat::print`）前后管理 termios 状态
+- `src/render.rs`：`drain_iterm2_acks()` 函数 + `q=2` 保留在协议序列中
 - `Cargo.toml`：新增 `libc` 依赖
 
 `q=2` 虽然对 iTerm2 无效，但保留它是正确的——对于遵守协议规范的终端（Ghostty、Kitty 等），`q=2` 可以从源头避免响应产生，echo 禁用只是作为兜底方案。
@@ -152,3 +152,11 @@ fn disable_echo() -> libc::termios {
 3. **`tcflush` 清空的是缓冲区内容，不是已经显示的内容。** 这是一个容易混淆的点：丢弃 stdin 缓冲区并不能撤回 TTY echo 已经输出到屏幕上的字节。
 
 4. **修复方案要在正确的层级操作。** 协议层的 `q=2` 和缓冲区层的 `tcflush` 都不够，最终需要在 TTY 驱动层禁用 echo 才能彻底解决。
+
+## 更新 — echo 抑制改为仅 iTerm2 启用
+
+最初的实现对**所有终端**无条件禁用 echo（上文「兼容性」表把它对 Ghostty / Kitty / WezTerm 标为「无害」）。后来发现这个前提并不成立：**Ghostty 的 Secure Keyboard Entry 启发式会把 `~ECHO`（关闭 echo）当作密码输入提示**而自动进入安全键盘模式，属于明显的副作用。
+
+因此现在的代码（`src/main.rs::needs_echo_suppression`）只在 `TERM_PROGRAM == iTerm.app` 时才禁用 echo；Ghostty / Kitty / WezTerm 依赖 `q=2` 从源头抑制响应，termdown 不再改动它们的 termios。渲染结束后只在 iTerm2 路径上调用 `render::drain_iterm2_acks()`（短暂等待后丢弃泄漏的 ACK 字节）。
+
+也就是说，上文「兼容性」表中「echo 禁用是否安全」一列对非 iTerm2 终端的结论应更正为：**不再禁用**——既无必要（它们遵守 `q=2`），又会误触 Ghostty 的安全键盘。

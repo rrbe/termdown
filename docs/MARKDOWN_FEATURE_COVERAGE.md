@@ -1,6 +1,6 @@
 # Markdown Feature Coverage
 
-Audit of `src/markdown.rs` against pulldown-cmark 0.13 and common Markdown extensions.
+Audit of `src/layout.rs` (the Markdown → `RenderedDoc` core) against pulldown-cmark 0.13 and common Markdown extensions.
 
 ## Supported (CommonMark core)
 
