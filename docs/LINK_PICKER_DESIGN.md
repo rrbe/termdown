@@ -2,7 +2,7 @@
 
 ## Problem
 
-Current `LinkSelect` mode (`src/tui/mod.rs:451-462`, `:924-932`):
+Current `LinkSelect` mode (`handle_link_select_key` + the status-bar overlay in `src/tui/mod.rs`):
 
 - Collects every link in the viewport via `visible_links`.
 - Status-bar overlay shows up to **9** labels (`take(9)` + `…`), keybinding only accepts digits `1`–`9`.
@@ -44,7 +44,7 @@ Reuse the existing ToC sidebar pattern. Add a `Mode::Links` (or reuse the TOC pa
 
 ### UX
 
-1. User presses `l` → a left panel opens (same 30-col width as ToC today, see `src/tui/mod.rs:805-842`).
+1. User presses `l` → a left panel opens (same 30-col width as ToC today — `TOC_PANEL_WIDTH` in `src/tui/mod.rs`).
 2. Panel lists every link in the **whole document** (not just viewport), grouped visually by heading section, each entry formatted as `<link-text>  →  <url>` or similar. External vs local `.md` gets a type badge (`↗` external, `↪` local).
 3. `j`/`k` (or arrows) moves the selection; `Enter` opens the selected link (follows existing `open_link_target` path).
 4. `l` again, or `Esc`, closes the panel.

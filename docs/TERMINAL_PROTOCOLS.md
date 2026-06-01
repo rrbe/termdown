@@ -74,7 +74,7 @@ Kitty 终端发明的**图像传输协议**，用来在文本流里夹带 PNG/RG
 - 图片在哪些位置出现完全一致
 - 但不比图片的 PNG 像素内容
 
-### `tests/headings.rs::extract_kitty_pngs`
+### `tests/headings.rs::extract_kitty_frames` + `decode_png`
 
 反方向——专门**只看图片**：扫 stdout 里所有 APC 帧，按 `m=1`/`m=0` 把分片拼回完整 base64，解码出原始 PNG 字节。然后用 `image` crate 解码 PNG，断言宽高、像素非空白、H1>H2>H3 缩放正确。
 
