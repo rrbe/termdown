@@ -1,8 +1,7 @@
 # TUI Mode — Design
 
-Design for termdown's `--tui` mode. Research and approach comparison
-that led to this design lives in `TUI_MODE_RESEARCH.md`. Read that first
-if you want the "why this stack"; this doc is the "what we're building".
+Design for termdown's `--tui` mode — the authoritative "what we're
+building" spec.
 
 ## Goals
 
