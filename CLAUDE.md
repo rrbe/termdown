@@ -15,16 +15,7 @@ This project uses a `Makefile` as the **single source of truth** for build, form
 - `make build` — `cargo build --all-targets`
 - `make check` — `fmt-check` + `lint` + `test` (run this before declaring work done or pushing)
 - `make all` — `fmt` + `check` + `build`
-
-### Coverage (local-only, optional)
-
-Test coverage is measured with [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). It is **not** a CI gate and is **not** part of `make check` — use it on demand to see what the test suite exercises.
-
-- `make coverage` — print a per-file coverage summary in the terminal
-- `make coverage-html` — generate an HTML report under `target/llvm-cov/html/index.html`
-- `make coverage-lcov` — emit `lcov.info` (git-ignored) for external tooling
-
-One-time setup: `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`. The first run does an instrumented rebuild, so it is slower than a normal `make test`.
+- `make coverage` — local test-coverage summary via `cargo-llvm-cov` (also `coverage-html` / `coverage-lcov`; on-demand, not a CI gate, not part of `make check`)
 
 ### Required workflow before finishing any code change
 
