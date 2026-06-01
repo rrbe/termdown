@@ -15,6 +15,7 @@ This project uses a `Makefile` as the **single source of truth** for build, form
 - `make build` — `cargo build --all-targets`
 - `make check` — `fmt-check` + `lint` + `test` (run this before declaring work done or pushing)
 - `make all` — `fmt` + `check` + `build`
+- `make coverage` — local test-coverage summary via `cargo-llvm-cov` (also `coverage-html` / `coverage-lcov`; on-demand, not a CI gate, not part of `make check`)
 
 ### Required workflow before finishing any code change
 

@@ -1,4 +1,8 @@
 /target
+
+# Coverage artifacts (cargo-llvm-cov)
+/lcov.info
+
 *.swp
 *.swo
 *~
