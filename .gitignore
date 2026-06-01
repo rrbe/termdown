@@ -3,6 +3,9 @@
 # Coverage artifacts (cargo-llvm-cov)
 /lcov.info
 
+# Generated stress/perf fixture — regenerate on demand, never commit (see docs/TESTING.md)
+/fixtures/specialized/large.md
+
 *.swp
 *.swo
 *~
