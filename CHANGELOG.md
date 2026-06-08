@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`cargo install termdown` no longer fails on Linux servers without the
+  fontconfig dev package.** font-kit now links fontconfig via `dlopen` on
+  Linux, so building requires neither `libfontconfig1-dev`/`fontconfig-devel`
+  nor `pkg-config`. If `libfontconfig` is also missing at run time, termdown
+  degrades to its bundled font instead of panicking. System font discovery
+  (including CJK headings) still works whenever fontconfig is present.
+- **Bundled fallback font was a corrupt HTML file, not a font** (shipped this
+  way since v0.1.0). The fallback only ever runs when no system font resolves,
+  so on machines with fonts it stayed invisible; on a font-less server it meant
+  headings silently degraded to plain text. Replaced with the real
+  OFL-licensed Source Serif 4 SemiBold, and added a test that parses the
+  bundled font so a bad asset can't regress.
+
 ## [0.6.0] - 2026-05-31
 
 ### Added
