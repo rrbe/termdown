@@ -34,6 +34,13 @@ cargo install termdown
 
 Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 
+> **Linux:** no `-dev` packages or `pkg-config` are required to build — only a
+> C toolchain (freetype is compiled from source when the system one isn't
+> found), and fontconfig is loaded lazily at run time. For system font
+> discovery (including CJK headings), install `fontconfig` plus the fonts you
+> want (e.g. `apt install fontconfig fonts-noto-cjk`). Without it, termdown
+> falls back to its bundled font.
+
 ### Prebuilt binary (no Rust toolchain needed)
 
 ```sh

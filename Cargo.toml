@@ -40,6 +40,14 @@ unicode-width = "0.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# On Linux, font-kit talks to fontconfig. Use the dlopen variant so building
+# termdown does NOT require the fontconfig dev package or pkg-config — the
+# shared library is loaded lazily at runtime instead. This keeps
+# `cargo install termdown` working on bare servers. macOS/Windows use
+# CoreText/DirectWrite and never pull fontconfig.
+[target.'cfg(target_os = "linux")'.dependencies]
+font-kit = { version = "0.14", features = ["source-fontconfig-dlopen"] }
+
 [profile.release]
 strip = true
 lto = true

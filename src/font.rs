@@ -281,30 +281,35 @@ fn try_font(source: &SystemSource, family: &str, props: &Properties) -> Option<F
 }
 
 fn resolve_font(
-    source: &SystemSource,
+    source: Option<&SystemSource>,
     props: &Properties,
     user_choice: Option<&str>,
     platform_defaults: &[&str],
 ) -> Option<FontRef<'static>> {
-    if let Some(family) = user_choice {
-        if let Some(font) = try_font(source, family, props) {
-            return Some(font);
+    if let Some(source) = source {
+        if let Some(family) = user_choice {
+            if let Some(font) = try_font(source, family, props) {
+                return Some(font);
+            }
+        }
+        for family in platform_defaults {
+            if let Some(font) = try_font(source, family, props) {
+                return Some(font);
+            }
         }
     }
-    for family in platform_defaults {
-        if let Some(font) = try_font(source, family, props) {
-            return Some(font);
-        }
-    }
+    // No system source (e.g. fontconfig unavailable on a bare server), or no
+    // family matched — fall back to the bundled font.
     FontRef::try_from_slice(FALLBACK_FONT).ok()
 }
 
 fn resolve_optional_font(
-    source: &SystemSource,
+    source: Option<&SystemSource>,
     props: &Properties,
     user_choice: Option<&str>,
     platform_defaults: &[&str],
 ) -> Option<FontRef<'static>> {
+    let source = source?;
     if let Some(family) = user_choice {
         if let Some(font) = try_font(source, family, props) {
             return Some(font);
@@ -348,14 +353,44 @@ pub fn get_fonts(level: u8, config: &Config) -> Option<&'static FontSet> {
 // the OS font registry (CoreText / fontconfig / DirectWrite), ~20-30ms per
 // call, and we'd otherwise pay it once per heading level. Thread-local
 // instead of `static` because on Linux `SystemSource` wraps a raw
-// `*mut FcConfig` pointer and is neither `Send` nor `Sync`.
+// `*mut FcConfig` pointer and is neither `Send` nor `Sync`. The value is
+// `Option` because on Linux fontconfig may be unavailable at runtime (see
+// `new_system_source`), in which case we render with the bundled font only.
 thread_local! {
-    static SYSTEM_SOURCE: OnceCell<SystemSource> = const { OnceCell::new() };
+    static SYSTEM_SOURCE: OnceCell<Option<SystemSource>> = const { OnceCell::new() };
+}
+
+/// Build the system font source, returning `None` when it can't be used.
+///
+/// On Linux, fontconfig is loaded lazily via dlopen (see `Cargo.toml`). If
+/// `libfontconfig` isn't installed at runtime, calling into font-kit would
+/// panic deep inside the FFI layer, so we probe for the shared library first
+/// and degrade to the bundled font instead of crashing.
+fn new_system_source() -> Option<SystemSource> {
+    #[cfg(target_os = "linux")]
+    if !fontconfig_available() {
+        return None;
+    }
+    Some(SystemSource::new())
+}
+
+#[cfg(target_os = "linux")]
+fn fontconfig_available() -> bool {
+    for name in [c"libfontconfig.so.1", c"libfontconfig.so"] {
+        // SAFETY: `name` is a valid NUL-terminated C string; we release the
+        // handle immediately. This only checks that the library can be loaded.
+        let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_LAZY) };
+        if !handle.is_null() {
+            unsafe { libc::dlclose(handle) };
+            return true;
+        }
+    }
+    false
 }
 
 fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
     SYSTEM_SOURCE.with(|cell| {
-        let source = cell.get_or_init(SystemSource::new);
+        let source = cell.get_or_init(new_system_source).as_ref();
         let props = Properties {
             style: Style::Normal,
             weight: weight_for_level(level),
@@ -395,6 +430,23 @@ fn resolve_font_set(level: u8, config: &Config) -> Option<FontSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_fallback_font_is_a_valid_font() {
+        // Regression guard: the bundled fallback is the only font available when
+        // no system font resolves (e.g. a Linux server with no fontconfig). That
+        // path never runs on a dev machine, so a corrupt asset stays invisible —
+        // which is exactly how a non-font HTML file shipped as the fallback from
+        // v0.1.0 until it surfaced. Parsing it here keeps that from regressing.
+        let font = FontRef::try_from_slice(FALLBACK_FONT)
+            .expect("bundled fallback font must parse as a valid font");
+        let glyph_id = font.glyph_id('A');
+        assert_ne!(glyph_id.0, 0, "fallback font should map basic Latin 'A'");
+        assert!(
+            font.outline(glyph_id).is_some(),
+            "fallback font should provide a renderable outline for 'A'"
+        );
+    }
 
     #[test]
     fn emoji_font_prefers_renderable_emoji_glyph() {
