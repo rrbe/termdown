@@ -49,7 +49,17 @@ jobs:
         if: runner.os == 'Linux'
         # Runtime library only (no -dev): the build loads fontconfig via dlopen,
         # so only the shared library is needed at run time.
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1
+        #
+        # font-kit pulls freetype-sys unconditionally on Linux, and it links the
+        # host's libfreetype whenever pkg-config finds a freetype2.pc. The runner
+        # image ships that .pc but not the matching libfreetype.so dev symlink, so
+        # the link fails. Point pkg-config at an empty dir to hide the .pc: this
+        # makes freetype-sys compile its bundled copy (static) instead — the same
+        # path `cargo install` takes on a bare server with no dev packages.
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfontconfig1
+          mkdir -p "$RUNNER_TEMP/empty-pkgconfig"
+          echo "PKG_CONFIG_LIBDIR=$RUNNER_TEMP/empty-pkgconfig" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: make build

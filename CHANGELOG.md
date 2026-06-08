@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`cargo install termdown` no longer fails on Linux servers without the
   fontconfig dev package.** font-kit now links fontconfig via `dlopen` on
   Linux, so building requires neither `libfontconfig1-dev`/`fontconfig-devel`
-  nor `pkg-config`. If `libfontconfig` is also missing at run time, termdown
-  degrades to its bundled font instead of panicking. System font discovery
-  (including CJK headings) still works whenever fontconfig is present.
+  nor `pkg-config`. font-kit still pulls `freetype-sys` on Linux, but when no
+  system freetype is found it compiles its bundled copy statically (only a C
+  toolchain is needed — already required for any native Rust build). If
+  `libfontconfig` is also missing at run time, termdown degrades to its bundled
+  font instead of panicking. System font discovery (including CJK headings)
+  still works whenever fontconfig is present.
 - **Bundled fallback font was a corrupt HTML file, not a font** (shipped this
   way since v0.1.0). The fallback only ever runs when no system font resolves,
   so on machines with fonts it stayed invisible; on a font-less server it meant
