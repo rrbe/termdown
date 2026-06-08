@@ -40,16 +40,18 @@ Add it as a Makefile target first, then reference the target from CI. Never let 
 
 If you notice you're on `master` with uncommitted changes, stash them, switch to a new branch, and pop the stash before committing.
 
-### Exception: version bumps
+### Version bumps (also via PR)
 
-Version bumps are the **only** allowed direct-to-`master` commits. They must not ride along inside a feature/fix PR — keep them as standalone commits so the release history stays readable.
+Remote `master` enforces a **"changes must be made through a pull request"** rule, so there are **no** direct-to-`master` pushes — version bumps included (a `git push origin master` is rejected with `GH013`). Keep the bump as its **own** standalone PR; never let it ride inside a feature/fix PR, so the release history stays readable.
 
 When the feature/fix PRs that make up a release have all merged into `master`:
 
 1. `git checkout master && git pull` to land on the merged tip.
-2. Edit `Cargo.toml` (and `Cargo.lock` — `cargo build` will refresh it) to the new version.
-3. Lock the `CHANGELOG.md` `[Unreleased]` section to `[X.Y.Z] - YYYY-MM-DD`.
-4. `git commit -m "chore: bump version to X.Y.Z"` on `master`.
-5. `git tag vX.Y.Z` and `git push origin master --follow-tags`.
+2. Branch off, e.g. `chore/bump-X.Y.Z`.
+3. Edit `Cargo.toml` (and `Cargo.lock` — `make build` refreshes it) to the new version.
+4. Lock the `CHANGELOG.md` `[Unreleased]` section to `[X.Y.Z] - YYYY-MM-DD`.
+5. Commit `chore: bump version to X.Y.Z`, push the branch, open a PR, and squash-merge it once CI is green.
+6. `git checkout master && git pull` to land on the squashed bump commit.
+7. `git tag -a vX.Y.Z -m "termdown X.Y.Z"` on that commit and `git push origin vX.Y.Z`.
 
-The `release.yml` workflow triggers on `v*` tag pushes and produces the GitHub Release (cross-platform binaries + checksums). Pushing the tag is therefore both the version stamp **and** the release trigger — no extra step.
+Tags are **not** covered by the branch-protection rule (it guards `refs/heads/master` only), so the tag push in step 7 succeeds directly — this is the one push that doesn't go through a PR. The `release.yml` workflow triggers on `v*` tag pushes and produces the GitHub Release (cross-platform binaries + checksums) **and** publishes to crates.io (`cargo publish`). Pushing the tag is therefore the release trigger; the version stamp itself lands earlier via the bump PR.
