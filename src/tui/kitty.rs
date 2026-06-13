@@ -70,6 +70,20 @@ impl ImageLifecycle {
         Ok(())
     }
 
+    /// Free the cached image *data* for `ids` (not just their placements), so
+    /// the terminal reclaims memory, and drop them from our tracking. Used to
+    /// reap ephemeral File Browser previews the user scrolled past — without
+    /// this, a long browse session leaves orphaned PNGs cached in the terminal
+    /// until exit.
+    pub fn forget<W: Write>(&mut self, w: &mut W, ids: &[u32]) -> io::Result<()> {
+        for &id in ids {
+            render::delete_image_data(w, id)?;
+            self.transmitted.remove(&id);
+            self.placed.remove(&id);
+        }
+        Ok(())
+    }
+
     /// Delete every placement + cached image data this client created.
     /// Clears our tracking. Called on TUI exit.
     pub fn cleanup<W: Write>(&mut self, w: &mut W) -> io::Result<()> {
@@ -182,5 +196,26 @@ mod tests {
         assert!(s.contains("a=d,d=A"));
         assert!(lc.placed.is_empty());
         assert!(lc.transmitted.is_empty());
+    }
+
+    #[test]
+    fn forget_frees_data_and_drops_tracking() {
+        let mut lc = ImageLifecycle::default();
+        let mut buf = Vec::new();
+        lc.register(&mut buf, 7, b"png").unwrap();
+        let mut desired = HashMap::new();
+        desired.insert(7u32, (0, 0));
+        lc.sync(&mut buf, &desired).unwrap();
+        buf.clear();
+
+        lc.forget(&mut buf, &[7]).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        // d=I (capital) frees the image data, not just the placement.
+        assert!(
+            s.contains("a=d,d=I,i=7"),
+            "expected data delete, got: {s:?}"
+        );
+        assert!(!lc.transmitted.contains(&7));
+        assert!(!lc.placed.contains_key(&7));
     }
 }

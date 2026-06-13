@@ -28,6 +28,7 @@ fn main() {
         println!();
         println!("Arguments:");
         println!("  FILE    Markdown file to render (use - or omit for stdin)");
+        println!("  DIR     Directory to browse for Markdown files (yazi-style file browser)");
         println!();
         println!("Options:");
         println!("  -h, --help                Show this help message");
@@ -36,7 +37,8 @@ fn main() {
         println!("  --cat                     Force non-interactive cat-style output");
         println!("  --no-bell                 Disable the edge-scroll terminal bell");
         println!();
-        println!("By default, passing FILE opens it in the interactive TUI.");
+        println!("By default, passing FILE opens it in the interactive TUI, and");
+        println!("passing a directory opens the File Browser (j/k move, Enter opens, q quits).");
         println!("Piped/redirected stdout and stdin input automatically use cat mode.");
         println!();
         println!("Config: ~/.config/termdown/config.toml");
@@ -94,11 +96,27 @@ fn main() {
         found
     };
 
+    let stdout_tty = io::stdout().is_tty();
+    let path_is_dir = file_arg
+        .as_deref()
+        .map(|p| p != "-" && std::path::Path::new(p).is_dir())
+        .unwrap_or(false);
+
+    // `termdown <dir>` on a TTY launches the File Browser: a yazi-style panel
+    // that scans the directory for Markdown files and live-previews them.
+    if !cat_flag && stdout_tty && path_is_dir {
+        let dir = file_arg.expect("path_is_dir implies a path");
+        tui::run_browser(&dir, &config, theme);
+        return;
+    }
+
     // TUI is the default when we have a real file path and stdout is a
     // terminal; --cat, piping/redirecting, or stdin input all fall through
     // to cat mode so scripts like `termdown foo.md | less` keep working.
-    let want_tui =
-        !cat_flag && matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty();
+    let want_tui = !cat_flag
+        && stdout_tty
+        && !path_is_dir
+        && matches!(file_arg.as_deref(), Some(p) if p != "-");
 
     if want_tui {
         let path = file_arg.expect("want_tui implies a file path");

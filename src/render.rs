@@ -428,6 +428,14 @@ pub fn delete_placement<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
     write!(w, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")
 }
 
+/// Delete `id`'s placements AND free its cached image data (`d=I`, capital).
+/// Unlike `delete_placement` (`d=i`), the terminal reclaims the stored PNG.
+/// Used to reap ephemeral File Browser previews the user has scrolled past so
+/// a long browse session doesn't accumulate orphaned image data.
+pub fn delete_image_data<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
+    write!(w, "\x1b_Ga=d,d=I,i={id},q=2;\x1b\\")
+}
+
 /// Delete all placements and image data this client has created. Used at
 /// TUI exit to clean up the terminal.
 pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
