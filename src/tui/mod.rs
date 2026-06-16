@@ -313,6 +313,21 @@ fn setup_watcher(path: &str) -> notify::Result<LiveWatch> {
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
+            // Ignore events that don't change file contents. `reload_active_doc`
+            // reads the target via `read_to_string`; on Linux/inotify that read
+            // surfaces as `Access(Open)` (and, when atime is bumped, `Modify(Metadata)`)
+            // for the very file we just loaded. Reacting to either would queue another
+            // reload and spin a self-sustaining loop. Everything that marks a real
+            // content change — `Create`, `Modify(Data/Name/Any)`, `Remove`, and the
+            // coarse `Any`/`Other` kinds some backends (e.g. macOS FSEvents) emit —
+            // still reloads.
+            use notify::event::{EventKind, ModifyKind};
+            if matches!(
+                event.kind,
+                EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(_))
+            ) {
+                return;
+            }
             // Snapshot the current target; it can change under us when the user
             // navigates to another doc (see `LiveWatch::retarget`).
             let want = match cb_target.lock() {
