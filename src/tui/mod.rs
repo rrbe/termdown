@@ -82,6 +82,9 @@ struct App {
     /// that may leave stale terminal cells behind (scroll, toc toggle, doc
     /// switch, resize).
     needs_full_redraw: bool,
+    /// Whether live-reload watching is active for this session. Drives the
+    /// status-bar indicator; the watcher itself lives in `run_ui`/`event_loop`.
+    watch: bool,
 }
 
 impl App {
@@ -107,6 +110,7 @@ impl App {
             theme,
             cell_px_height: 0,
             needs_full_redraw: true,
+            watch: false,
         };
         app.push_new_doc(path, doc);
         app
@@ -125,33 +129,7 @@ impl App {
     /// that point at them) from the global allocator so ids never collide
     /// across docs in a single session.
     fn push_new_doc(&mut self, path: String, mut doc: layout::RenderedDoc) -> usize {
-        let offset = self.next_image_id;
-        // layout::build() assigns ids starting at 1; shift each by (offset - 1)
-        // so the first image of this doc becomes `offset`.
-        let mut id_map: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-        for img in &mut doc.images {
-            let new_id = offset + (img.id - 1);
-            id_map.insert(img.id, new_id);
-            img.id = new_id;
-        }
-        if let Some(max) = doc.images.iter().map(|i| i.id).max() {
-            self.next_image_id = max + 1;
-        }
-        // Patch Span::HeadingImage and LineKind::Heading { id } references.
-        for line in &mut doc.lines {
-            for span in &mut line.spans {
-                if let layout::Span::HeadingImage { id, .. } = span {
-                    if let Some(&new) = id_map.get(id) {
-                        *id = new;
-                    }
-                }
-            }
-            if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
-                if let Some(&new) = id_map.get(hid) {
-                    *hid = new;
-                }
-            }
-        }
+        renumber_doc_images(&mut doc, &mut self.next_image_id);
         let (width, height) = self.term_size;
         let viewport = Viewport::new(height, width);
         let mut entry = DocEntry {
@@ -224,7 +202,217 @@ impl App {
     }
 }
 
-pub fn run(path: &str, config: &Config, theme: Theme) {
+/// Renumber a freshly-built doc's image ids from the global allocator so they
+/// never collide with ids already loaded in the session, patching the
+/// `Span::HeadingImage` and `LineKind::Heading { id }` references to match.
+/// `layout::build` always assigns ids starting at 1; this shifts each so the
+/// first image becomes `*next_image_id`, then advances `*next_image_id` past
+/// the highest id assigned. Shared by initial/link loads (`push_new_doc`) and
+/// live reload (`reload_active_doc`).
+fn renumber_doc_images(doc: &mut layout::RenderedDoc, next_image_id: &mut u32) {
+    let offset = *next_image_id;
+    let mut id_map: HashMap<u32, u32> = HashMap::new();
+    for img in &mut doc.images {
+        let new_id = offset + (img.id - 1);
+        id_map.insert(img.id, new_id);
+        img.id = new_id;
+    }
+    if let Some(max) = doc.images.iter().map(|i| i.id).max() {
+        *next_image_id = max + 1;
+    }
+    for line in &mut doc.lines {
+        for span in &mut line.spans {
+            if let layout::Span::HeadingImage { id, .. } = span {
+                if let Some(&new) = id_map.get(id) {
+                    *id = new;
+                }
+            }
+        }
+        if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
+            if let Some(&new) = id_map.get(hid) {
+                *hid = new;
+            }
+        }
+    }
+}
+
+/// Canonicalize `path` and derive its parent directory, applying the fallbacks
+/// the watcher relies on: an unresolvable path is used verbatim (it may not
+/// exist yet, e.g. mid atomic-rename), and a missing/empty parent becomes `.`.
+fn canonical_target_and_dir(path: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path));
+    let dir = target
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    (target, dir)
+}
+
+/// Live-reload file watcher whose target follows the active document.
+///
+/// Watches a **directory** (non-recursively) rather than the file itself:
+/// editors commonly save by writing a temp file and renaming it over the
+/// target, which swaps the inode and would silently break a watch bound to the
+/// original file. The callback filters directory events down to the current
+/// target and pings the channel `rx` drains. The target lives behind an
+/// `Arc<Mutex<…>>` shared with the callback thread so [`retarget`](Self::retarget)
+/// can re-point it (and move the directory watch when needed) as the user
+/// follows `.md` links or navigates back/forward — keeping live reload bound to
+/// whatever doc is on screen.
+struct LiveWatch {
+    watcher: notify::RecommendedWatcher,
+    rx: std::sync::mpsc::Receiver<()>,
+    /// The file the callback currently matches against. Shared with the
+    /// callback thread; updated by [`retarget`](Self::retarget).
+    target: std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>,
+    /// The directory currently watched (the target's parent). Tracked so
+    /// `retarget` only re-issues watch/unwatch when the directory changes.
+    watched_dir: std::path::PathBuf,
+}
+
+impl LiveWatch {
+    /// Point the watch at `path` (the now-active document): update the shared
+    /// target the callback filters on and, when `path` lives in a different
+    /// directory, move the directory watch too. Best effort — a failed re-watch
+    /// restores the previous watch rather than aborting the session. Finally
+    /// drains any events already queued for the old target so a navigation
+    /// doesn't trigger a spurious reload of the freshly-loaded doc.
+    fn retarget(&mut self, path: &str) {
+        use notify::{RecursiveMode, Watcher};
+        let (new_target, new_dir) = canonical_target_and_dir(path);
+        if let Ok(mut t) = self.target.lock() {
+            *t = new_target;
+        }
+        if new_dir != self.watched_dir {
+            let _ = self.watcher.unwatch(&self.watched_dir);
+            match self.watcher.watch(&new_dir, RecursiveMode::NonRecursive) {
+                Ok(()) => self.watched_dir = new_dir,
+                // Couldn't watch the new dir; try to restore the previous watch
+                // so we at least keep reloading the old location.
+                Err(_) => {
+                    let _ = self
+                        .watcher
+                        .watch(&self.watched_dir, RecursiveMode::NonRecursive);
+                }
+            }
+        }
+        while self.rx.try_recv().is_ok() {}
+    }
+}
+
+/// Spawn a [`LiveWatch`] for `path`'s live reload. See the struct docs for why
+/// it watches the parent directory and how the target follows the active doc.
+fn setup_watcher(path: &str) -> notify::Result<LiveWatch> {
+    use notify::{RecursiveMode, Watcher};
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (target_path, dir) = canonical_target_and_dir(path);
+    let target = std::sync::Arc::new(std::sync::Mutex::new(target_path));
+    let cb_target = std::sync::Arc::clone(&target);
+
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            // Ignore events that don't change file contents. `reload_active_doc`
+            // reads the target via `read_to_string`; on Linux/inotify that read
+            // surfaces as `Access(Open)` (and, when atime is bumped, `Modify(Metadata)`)
+            // for the very file we just loaded. Reacting to either would queue another
+            // reload and spin a self-sustaining loop. Everything that marks a real
+            // content change — `Create`, `Modify(Data/Name/Any)`, `Remove`, and the
+            // coarse `Any`/`Other` kinds some backends (e.g. macOS FSEvents) emit —
+            // still reloads.
+            use notify::event::{EventKind, ModifyKind};
+            if matches!(
+                event.kind,
+                EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(_))
+            ) {
+                return;
+            }
+            // Snapshot the current target; it can change under us when the user
+            // navigates to another doc (see `LiveWatch::retarget`).
+            let want = match cb_target.lock() {
+                Ok(t) => t.clone(),
+                Err(_) => return,
+            };
+            let hit = event.paths.iter().any(|p| {
+                // Prefer canonical comparison; during a rename the path may not
+                // resolve, so fall back to matching the file name.
+                std::fs::canonicalize(p)
+                    .map(|c| c == want)
+                    .unwrap_or_else(|_| p.file_name() == want.file_name())
+            });
+            if hit {
+                let _ = tx.send(());
+            }
+        }
+    })?;
+
+    watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+    Ok(LiveWatch {
+        watcher,
+        rx,
+        target,
+        watched_dir: dir,
+    })
+}
+
+/// Re-read the active doc's file and rebuild it in place, preserving scroll
+/// position, the ToC / metadata fold state, and any active search. On a
+/// transient read error — e.g. the brief window mid atomic-rename when the file
+/// is absent — the current render is kept and the follow-up event retries.
+fn reload_active_doc(app: &mut App) {
+    let path = app.active().path.clone();
+    let source = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let mut new_doc = layout::build(&source, &app.config, app.theme);
+    refine_image_rows(&mut new_doc, app.cell_px_height);
+    renumber_doc_images(&mut new_doc, &mut app.next_image_id);
+
+    let show_metadata = app.config.metadata.unwrap_or(true);
+    let expanded = app.active().metadata_expanded;
+    // Anchor: where the viewport top sits now, so we can land near the same
+    // content after the line set shifts.
+    let anchor_logical = app.active().viewport.top_logical();
+    // Rebuild the match set against the new content if a search is active,
+    // keeping focus near the previously-current match.
+    let new_search = app
+        .active()
+        .search
+        .as_ref()
+        .map(|s| s.rebuilt_for(&new_doc));
+
+    {
+        let active = app.active_mut();
+        active.doc = new_doc;
+        active.search = new_search;
+        active.viewport.invalidate_wrap();
+        active
+            .viewport
+            .ensure_wrap(&active.doc, show_metadata, expanded);
+        if let Some(logical) = anchor_logical {
+            if let Some(vi) = active.viewport.visual_line_for_logical(logical) {
+                active.viewport.top = vi;
+            }
+        }
+        // Clamp into range for the (possibly shorter) new doc.
+        active.viewport.scroll_by(0);
+    }
+
+    // Evict the old doc's images + placements from the terminal so cached PNG
+    // data doesn't accumulate across reloads; the `needs_full_redraw` branch
+    // then re-transmits and re-places the new doc's images.
+    {
+        let mut out = io::stdout().lock();
+        let _ = app.images.cleanup(&mut out);
+        let _ = out.flush();
+    }
+    app.needs_full_redraw = true;
+}
+
+pub fn run(path: &str, config: &Config, theme: Theme, watch: bool) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -234,13 +422,19 @@ pub fn run(path: &str, config: &Config, theme: Theme) {
     };
     let doc = layout::build(&source, config, theme);
 
-    if let Err(e) = run_ui(doc, path.to_string(), config.clone(), theme) {
+    if let Err(e) = run_ui(doc, path.to_string(), config.clone(), theme, watch) {
         eprintln!("termdown: tui error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) -> io::Result<()> {
+fn run_ui(
+    doc: layout::RenderedDoc,
+    path: String,
+    config: Config,
+    theme: Theme,
+    watch: bool,
+) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(stdout, EnterAlternateScreen)?;
@@ -249,6 +443,7 @@ fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) 
     let size = terminal.size()?;
     let body_height = size.height.saturating_sub(1);
     let mut app = App::new_with_initial_doc(path, doc, body_height, size.width, config, theme);
+    app.watch = watch;
     // Query the real terminal cell pixel height up-front so heading image
     // `rows` estimates are accurate from the first frame onward. If the OS
     // doesn't report it, `cell_px_height` stays 0 and we keep per-level
@@ -268,7 +463,22 @@ fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) 
         out.flush()?;
     }
 
-    let result = event_loop(&mut terminal, &mut app);
+    // Start the file watcher (live reload). The `LiveWatch` owns the
+    // `notify::Watcher`, so holding it for the whole event loop keeps the watch
+    // alive (dropping a `notify::Watcher` stops it). A setup failure disables
+    // watching rather than aborting the session.
+    let mut live_watch: Option<LiveWatch> = None;
+    if watch {
+        match setup_watcher(&app.active().path) {
+            Ok(lw) => live_watch = Some(lw),
+            Err(e) => {
+                eprintln!("termdown: file watch disabled: {e}");
+                app.watch = false;
+            }
+        }
+    }
+
+    let result = event_loop(&mut terminal, &mut app, live_watch);
 
     {
         let mut out = io::stdout().lock();
@@ -282,8 +492,26 @@ fn run_ui(doc: layout::RenderedDoc, path: String, config: Config, theme: Theme) 
     result
 }
 
-fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+fn event_loop<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut App,
+    mut live_watch: Option<LiveWatch>,
+) -> io::Result<()> {
     loop {
+        // Live reload: drain any pending file-change notifications, coalescing
+        // the burst of events a single save produces into one reload. Checked
+        // every iteration (not just when a key arrives) so a save with no
+        // keyboard activity still triggers within one ~50ms tick.
+        if let Some(lw) = &live_watch {
+            let mut changed = false;
+            while lw.rx.try_recv().is_ok() {
+                changed = true;
+            }
+            if changed {
+                reload_active_doc(app);
+            }
+        }
+
         // Sync viewport dimensions to the current terminal size. Handles
         // initial startup and terminal resizes. Any change invalidates the
         // wrap cache (`ensure_wrap` re-wraps when `self.width != cache_width`).
@@ -346,6 +574,7 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
                 app.needs_full_redraw = true;
                 continue;
             }
+            let cursor_before = app.cursor;
             match &mut app.mode {
                 Mode::Normal => handle_normal_key(app, &ev)?,
                 Mode::Search { .. } => handle_search_key(app, ev)?,
@@ -354,6 +583,13 @@ fn event_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Resu
             }
             if app.should_quit {
                 return Ok(());
+            }
+            // If navigation (link / back / forward) switched the active doc,
+            // re-point the watcher so live reload follows the doc on screen.
+            if app.cursor != cursor_before {
+                if let Some(lw) = &mut live_watch {
+                    lw.retarget(&app.active().path);
+                }
             }
             // Scroll / mode-change / search events rely on ratatui's cell
             // diff + `images.sync()` for correctness — no full clear. Only
@@ -1249,7 +1485,13 @@ fn render_status_bar(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, ap
             label
         }
         Mode::Help => String::from(" Help — press ? / Esc / q to close "),
-        Mode::Normal => String::new(),
+        Mode::Normal => {
+            if app.watch {
+                String::from(" [watch] ")
+            } else {
+                String::new()
+            }
+        }
     };
     let left_w = left_text.width();
     // Guarantee at least one blank column between left and right when both
@@ -1485,6 +1727,78 @@ mod open_link_tests {
         assert!(!looks_like_local_md("file:///a.md"));
         assert!(!looks_like_local_md("other.txt"));
         assert!(!looks_like_local_md(""));
+    }
+}
+
+#[cfg(test)]
+mod renumber_tests {
+    use super::*;
+    use crate::layout::{Line, LineKind, RenderedDoc, Span};
+
+    fn heading_doc() -> RenderedDoc {
+        // Two H1/H2 images with ids 1 and 2 as layout::build would assign,
+        // plus matching Span::HeadingImage / LineKind::Heading references.
+        let line = |id: u32, level: u8| Line {
+            spans: vec![Span::HeadingImage { id, rows: 3 }],
+            kind: LineKind::Heading {
+                level,
+                id: Some(id),
+            },
+        };
+        RenderedDoc {
+            lines: vec![line(1, 1), line(2, 2)],
+            headings: vec![],
+            images: vec![
+                crate::render::HeadingImage {
+                    id: 1,
+                    png: vec![],
+                    cols: 0,
+                    rows: 3,
+                    px_width: 1,
+                    px_height: 1,
+                },
+                crate::render::HeadingImage {
+                    id: 2,
+                    png: vec![],
+                    cols: 0,
+                    rows: 3,
+                    px_width: 1,
+                    px_height: 1,
+                },
+            ],
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn renumber_shifts_ids_and_patches_refs() {
+        let mut doc = heading_doc();
+        let mut next = 5;
+        renumber_doc_images(&mut doc, &mut next);
+
+        // ids 1,2 → 5,6; allocator advances past the highest.
+        assert_eq!(doc.images[0].id, 5);
+        assert_eq!(doc.images[1].id, 6);
+        assert_eq!(next, 7);
+
+        // Span and LineKind references are remapped in lockstep.
+        for (line, expected) in doc.lines.iter().zip([5u32, 6]) {
+            assert!(matches!(line.spans[0], Span::HeadingImage { id, .. } if id == expected));
+            assert!(matches!(line.kind, LineKind::Heading { id: Some(id), .. } if id == expected));
+        }
+    }
+
+    #[test]
+    fn renumber_empty_doc_leaves_allocator_untouched() {
+        let mut doc = RenderedDoc {
+            lines: vec![],
+            headings: vec![],
+            images: vec![],
+            metadata: None,
+        };
+        let mut next = 9;
+        renumber_doc_images(&mut doc, &mut next);
+        assert_eq!(next, 9);
     }
 }
 

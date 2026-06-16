@@ -126,6 +126,17 @@ impl Viewport {
             .position(|vl| vl.logical_index == logical)
     }
 
+    /// Logical index of the line currently at the top of the viewport, or
+    /// `None` when that row is a metadata/sentinel row ([`NO_LOGICAL`]). Pairs
+    /// with [`visual_line_for_logical`](Self::visual_line_for_logical) to
+    /// restore the scroll position after the document is rebuilt on reload.
+    pub fn top_logical(&self) -> Option<usize> {
+        self.visual_lines
+            .get(self.top)
+            .map(|vl| vl.logical_index)
+            .filter(|&l| l != NO_LOGICAL)
+    }
+
     /// Move the viewport to the next heading line after `after_visual`.
     /// No-op if no heading exists further in the document.
     pub fn jump_to_next_heading(&mut self, doc: &RenderedDoc, after_visual: usize) {
@@ -404,6 +415,26 @@ mod tests {
         vp.ensure_wrap(&doc, false, false);
         assert!(vp.visible().is_empty());
         assert_eq!(vp.total_visual_lines(), 0);
+    }
+
+    #[test]
+    fn top_logical_round_trips_with_visual_line_for_logical() {
+        let doc = make_doc(10);
+        let mut vp = Viewport::new(4, 40);
+        vp.ensure_wrap(&doc, false, false);
+        // Short lines: one visual row per logical line, so top == logical here.
+        vp.scroll_by(3);
+        let logical = vp.top_logical().expect("top row maps to a logical line");
+        assert_eq!(logical, 3);
+        assert_eq!(vp.visual_line_for_logical(logical), Some(vp.top));
+    }
+
+    #[test]
+    fn top_logical_is_none_on_empty_doc() {
+        let doc = make_doc(0);
+        let mut vp = Viewport::new(4, 40);
+        vp.ensure_wrap(&doc, false, false);
+        assert_eq!(vp.top_logical(), None);
     }
 
     #[test]

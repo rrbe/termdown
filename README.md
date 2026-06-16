@@ -101,6 +101,9 @@ cat notes.md | termdown
 # Pick a theme; show help
 termdown --theme light README.md
 termdown --help
+
+# Live preview: re-render on every save (edit in your editor, watch here)
+termdown --watch notes.md
 ```
 
 The full CLI reference, TUI key bindings, configuration, and known issues live in the **[Usage Guide](docs/USAGE.md)**. Configuration is optional and lives at `~/.config/termdown/config.toml` -- see [`config.example.toml`](config.example.toml) for every default.

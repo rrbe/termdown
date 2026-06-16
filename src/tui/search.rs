@@ -12,6 +12,9 @@ pub struct MatchPos {
 }
 
 pub struct SearchState {
+    /// The committed query string, retained so the match set can be rebuilt
+    /// against new content after a live reload.
+    pub query: String,
     pub matches: Vec<MatchPos>,
     pub current: Option<usize>,
 }
@@ -19,10 +22,45 @@ pub struct SearchState {
 impl SearchState {
     pub fn new(query: &str, doc: &RenderedDoc) -> Self {
         Self {
+            query: query.to_string(),
             matches: find_all(query, doc),
             current: None,
         }
     }
+
+    /// Rebuild the match set against `doc` from the retained query — used after
+    /// a live reload — keeping focus on the match nearest the previously-current
+    /// one so `n` / `N` resume roughly where the user was rather than snapping
+    /// back to the top.
+    pub fn rebuilt_for(&self, doc: &RenderedDoc) -> Self {
+        let matches = find_all(&self.query, doc);
+        let current = self
+            .current
+            .and_then(|i| self.matches.get(i))
+            .and_then(|prev| nearest_match_index(&matches, prev));
+        Self {
+            query: self.query.clone(),
+            matches,
+            current,
+        }
+    }
+}
+
+/// Index of the first match at or after `anchor` in document order (line, then
+/// byte offset), falling back to the last match when `anchor` sits past the end.
+/// `None` only when there are no matches.
+fn nearest_match_index(matches: &[MatchPos], anchor: &MatchPos) -> Option<usize> {
+    if matches.is_empty() {
+        return None;
+    }
+    let key = |m: &MatchPos| (m.line_index, m.byte_range.start);
+    let a = key(anchor);
+    Some(
+        matches
+            .iter()
+            .position(|m| key(m) >= a)
+            .unwrap_or(matches.len() - 1),
+    )
 }
 
 /// Scan the document and return every match position (line index + byte range).
@@ -155,5 +193,41 @@ mod tests {
         let m = find_all("hello", &doc);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].byte_range, 0..5);
+    }
+
+    #[test]
+    fn rebuilt_for_keeps_focus_near_previous_current() {
+        // Three matches; focus the middle one, then reload against a doc where
+        // a line was inserted above so the same text shifts down by one line.
+        let before = doc_with(&["foo", "bar", "foo", "baz", "foo"]);
+        let mut st = SearchState::new("foo", &before);
+        assert_eq!(st.matches.len(), 3);
+        st.current = Some(1); // the "foo" on line 2
+
+        let after = doc_with(&["NEW", "foo", "bar", "foo", "baz", "foo"]);
+        let rebuilt = st.rebuilt_for(&after);
+        assert_eq!(rebuilt.matches.len(), 3);
+        // The previously-current match now lives on line 3; focus follows it.
+        let cur = rebuilt.current.expect("focus should be retained");
+        assert_eq!(rebuilt.matches[cur].line_index, 3);
+    }
+
+    #[test]
+    fn rebuilt_for_drops_focus_when_matches_disappear() {
+        let before = doc_with(&["foo", "foo"]);
+        let mut st = SearchState::new("foo", &before);
+        st.current = Some(1);
+        let after = doc_with(&["nothing here"]);
+        let rebuilt = st.rebuilt_for(&after);
+        assert!(rebuilt.matches.is_empty());
+        assert_eq!(rebuilt.current, None);
+    }
+
+    #[test]
+    fn rebuilt_for_with_no_prior_focus_stays_unfocused() {
+        let before = doc_with(&["foo", "foo"]);
+        let st = SearchState::new("foo", &before); // current is None
+        let rebuilt = st.rebuilt_for(&before);
+        assert_eq!(rebuilt.current, None);
     }
 }

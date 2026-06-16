@@ -15,6 +15,7 @@ termdown [选项] [文件]
 | `--cat` | 强制使用非交互的 cat 风格输出（管道友好）。 |
 | `--theme <auto\|dark\|light>` | 配色主题。默认 `auto`，通过 OSC 11 检测终端背景色。 |
 | `--no-bell` | 关闭到顶/到底的终端提示铃（也可在配置中设 `bell = false`）。 |
+| `-w`, `--watch` | 监听文件变动并在保存时实时刷新预览（也可在配置中设 `watch = true`）。仅 TUI 模式生效。 |
 | `-h`, `--help` | 显示帮助。 |
 | `-V`, `--version` | 显示版本。 |
 
@@ -41,12 +42,23 @@ termdown --theme light README.md
 
 # 关闭到顶/到底时的提示铃声
 termdown --no-bell README.md
+
+# 实时预览：在编辑器里改，保存即重新渲染
+termdown --watch notes.md
 ```
 
 ## TUI 模式
 
 当传入文件且 stdout 为真实终端时自动进入 TUI。TUI 模式需要指定文件路径，不支持从
 stdin 读取。
+
+### 实时刷新（`--watch`）
+
+`termdown --watch 文件` 会在文件发生变动时重新渲染预览 —— 非常适合左右分屏的工作流：
+一侧用编辑器（如 vim）编辑 Markdown，另一侧开着 `termdown --watch` 实时预览。重新加载
+会保留滚动位置、目录面板的开合状态、元数据折叠状态以及正在进行的搜索；状态栏会显示
+`[watch]` 标记。编辑器的原子保存（先写临时文件再重命名覆盖）也能正确处理。标题图片会被
+缓存，因此只改正文的保存几乎瞬间刷新，只有标题文字真正变化时才会重新栅格化。
 
 | 按键 | 动作 |
 |---|---|
@@ -87,6 +99,10 @@ bell = true
 # --cat 和 TUI 会显示一行 dim 摘要，TUI 按 `m` 可展开。设为 false 则完全
 # 隐藏元数据（仍会解析，因此不会泄漏进正文）。
 metadata = true
+
+# 监听文件变动并在保存时实时刷新预览。默认 false，仅 TUI 模式生效。
+# 命令行可用 `--watch` / `-w` 开启。
+watch = false
 
 [font.heading]
 # 英文标题字体（推荐无衬线字体）

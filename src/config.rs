@@ -26,6 +26,13 @@ pub struct Config {
     /// never leaks into body content.
     /// See `docs/adr/0001-metadata-block-handling.md`.
     pub metadata: Option<bool>,
+
+    /// Watch the file and live-reload the TUI preview when it changes on disk.
+    /// Unlike `bell` / `metadata`, the default is **off**: `None` (key absent)
+    /// and `Some(false)` both disable watching; `Some(true)` enables it. CLI
+    /// `--watch` / `-w` overrides to `Some(true)`. Only meaningful in the
+    /// interactive TUI — cat mode renders once and stdin has no path to re-read.
+    pub watch: Option<bool>,
 }
 
 /// Color theme selection. `Auto` (the default when the key is absent) detects
@@ -142,6 +149,9 @@ mod tests {
         // default explicitly as `Some(true)` (a missing key parses as `None`,
         // which is also treated as "show").
         assert_eq!(parsed.metadata, Some(true));
+        // `watch` defaults to off; the example spells that out as `false`
+        // (a missing key parses as `None`, which is also treated as "off").
+        assert_eq!(parsed.watch, Some(false));
         // Font overrides are commented out, so they must parse as unset.
         assert!(parsed.font.heading.latin.is_none());
         assert!(parsed.font.heading.cjk.is_none());

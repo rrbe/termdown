@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Live reload (`--watch` / `-w`).** `termdown --watch FILE` watches the file
+  and re-renders the TUI preview whenever it changes on disk — built for a
+  two-pane "edit on one side, preview on the other" workflow. Scroll position,
+  Table-of-Contents and metadata fold state, and any active search are
+  preserved across reloads, and a `[watch]` marker shows in the status bar.
+  Editor atomic saves (write-temp-then-rename) are handled by watching the
+  parent directory. Also configurable via `watch = true` in
+  `~/.config/termdown/config.toml` (default off; TUI only).
+- **Heading-image cache.** Rasterized H1–H3 heading PNGs are memoized by
+  `(level, theme, text)`, so a live reload re-rasterizes only headings whose
+  text actually changed — a body-only edit re-renders near-instantly.
+
 ## [0.6.1] - 2026-06-08
 
 ### Fixed
