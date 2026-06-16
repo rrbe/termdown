@@ -236,31 +236,95 @@ fn renumber_doc_images(doc: &mut layout::RenderedDoc, next_image_id: &mut u32) {
     }
 }
 
-/// Spawn a `notify` watcher for `path`'s live reload. Watches the **parent
-/// directory** (non-recursively) rather than the file itself: editors commonly
-/// save by writing a temp file and renaming it over the target, which swaps the
-/// inode and would silently break a watch bound to the original file. The
-/// callback filters directory events down to our target and pings `tx`; the
-/// returned `Receiver` is drained by the event loop.
-fn setup_watcher(
-    path: &str,
-) -> notify::Result<(notify::RecommendedWatcher, std::sync::mpsc::Receiver<()>)> {
+/// Canonicalize `path` and derive its parent directory, applying the fallbacks
+/// the watcher relies on: an unresolvable path is used verbatim (it may not
+/// exist yet, e.g. mid atomic-rename), and a missing/empty parent becomes `.`.
+fn canonical_target_and_dir(path: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path));
+    let dir = target
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    (target, dir)
+}
+
+/// Live-reload file watcher whose target follows the active document.
+///
+/// Watches a **directory** (non-recursively) rather than the file itself:
+/// editors commonly save by writing a temp file and renaming it over the
+/// target, which swaps the inode and would silently break a watch bound to the
+/// original file. The callback filters directory events down to the current
+/// target and pings the channel `rx` drains. The target lives behind an
+/// `Arc<Mutex<…>>` shared with the callback thread so [`retarget`](Self::retarget)
+/// can re-point it (and move the directory watch when needed) as the user
+/// follows `.md` links or navigates back/forward — keeping live reload bound to
+/// whatever doc is on screen.
+struct LiveWatch {
+    watcher: notify::RecommendedWatcher,
+    rx: std::sync::mpsc::Receiver<()>,
+    /// The file the callback currently matches against. Shared with the
+    /// callback thread; updated by [`retarget`](Self::retarget).
+    target: std::sync::Arc<std::sync::Mutex<std::path::PathBuf>>,
+    /// The directory currently watched (the target's parent). Tracked so
+    /// `retarget` only re-issues watch/unwatch when the directory changes.
+    watched_dir: std::path::PathBuf,
+}
+
+impl LiveWatch {
+    /// Point the watch at `path` (the now-active document): update the shared
+    /// target the callback filters on and, when `path` lives in a different
+    /// directory, move the directory watch too. Best effort — a failed re-watch
+    /// restores the previous watch rather than aborting the session. Finally
+    /// drains any events already queued for the old target so a navigation
+    /// doesn't trigger a spurious reload of the freshly-loaded doc.
+    fn retarget(&mut self, path: &str) {
+        use notify::{RecursiveMode, Watcher};
+        let (new_target, new_dir) = canonical_target_and_dir(path);
+        if let Ok(mut t) = self.target.lock() {
+            *t = new_target;
+        }
+        if new_dir != self.watched_dir {
+            let _ = self.watcher.unwatch(&self.watched_dir);
+            match self.watcher.watch(&new_dir, RecursiveMode::NonRecursive) {
+                Ok(()) => self.watched_dir = new_dir,
+                // Couldn't watch the new dir; try to restore the previous watch
+                // so we at least keep reloading the old location.
+                Err(_) => {
+                    let _ = self
+                        .watcher
+                        .watch(&self.watched_dir, RecursiveMode::NonRecursive);
+                }
+            }
+        }
+        while self.rx.try_recv().is_ok() {}
+    }
+}
+
+/// Spawn a [`LiveWatch`] for `path`'s live reload. See the struct docs for why
+/// it watches the parent directory and how the target follows the active doc.
+fn setup_watcher(path: &str) -> notify::Result<LiveWatch> {
     use notify::{RecursiveMode, Watcher};
 
     let (tx, rx) = std::sync::mpsc::channel();
-    // Canonicalize so event paths (which notify reports absolute) can be
-    // compared against the target even across an atomic rename.
-    let target = std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path));
-    let watch_target = target.clone();
+    let (target_path, dir) = canonical_target_and_dir(path);
+    let target = std::sync::Arc::new(std::sync::Mutex::new(target_path));
+    let cb_target = std::sync::Arc::clone(&target);
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
+            // Snapshot the current target; it can change under us when the user
+            // navigates to another doc (see `LiveWatch::retarget`).
+            let want = match cb_target.lock() {
+                Ok(t) => t.clone(),
+                Err(_) => return,
+            };
             let hit = event.paths.iter().any(|p| {
                 // Prefer canonical comparison; during a rename the path may not
                 // resolve, so fall back to matching the file name.
                 std::fs::canonicalize(p)
-                    .map(|c| c == watch_target)
-                    .unwrap_or_else(|_| p.file_name() == watch_target.file_name())
+                    .map(|c| c == want)
+                    .unwrap_or_else(|_| p.file_name() == want.file_name())
             });
             if hit {
                 let _ = tx.send(());
@@ -268,13 +332,13 @@ fn setup_watcher(
         }
     })?;
 
-    let dir = target
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .map(|d| d.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
     watcher.watch(&dir, RecursiveMode::NonRecursive)?;
-    Ok((watcher, rx))
+    Ok(LiveWatch {
+        watcher,
+        rx,
+        target,
+        watched_dir: dir,
+    })
 }
 
 /// Re-read the active doc's file and rebuild it in place, preserving scroll
@@ -297,12 +361,13 @@ fn reload_active_doc(app: &mut App) {
     // Anchor: where the viewport top sits now, so we can land near the same
     // content after the line set shifts.
     let anchor_logical = app.active().viewport.top_logical();
-    // Rebuild the match set against the new content if a search is active.
+    // Rebuild the match set against the new content if a search is active,
+    // keeping focus near the previously-current match.
     let new_search = app
         .active()
         .search
         .as_ref()
-        .map(|s| SearchState::new(&s.query, &new_doc));
+        .map(|s| s.rebuilt_for(&new_doc));
 
     {
         let active = app.active_mut();
@@ -383,27 +448,22 @@ fn run_ui(
         out.flush()?;
     }
 
-    // Start the file watcher (live reload). Bound to `_watcher` so it stays
-    // alive for the whole event loop — dropping a `notify::Watcher` stops it.
-    // A setup failure disables watching rather than aborting the session.
-    let mut _watcher: Option<notify::RecommendedWatcher> = None;
-    let reload_rx: Option<std::sync::mpsc::Receiver<()>> = if watch {
+    // Start the file watcher (live reload). The `LiveWatch` owns the
+    // `notify::Watcher`, so holding it for the whole event loop keeps the watch
+    // alive (dropping a `notify::Watcher` stops it). A setup failure disables
+    // watching rather than aborting the session.
+    let mut live_watch: Option<LiveWatch> = None;
+    if watch {
         match setup_watcher(&app.active().path) {
-            Ok((w, rx)) => {
-                _watcher = Some(w);
-                Some(rx)
-            }
+            Ok(lw) => live_watch = Some(lw),
             Err(e) => {
                 eprintln!("termdown: file watch disabled: {e}");
                 app.watch = false;
-                None
             }
         }
-    } else {
-        None
-    };
+    }
 
-    let result = event_loop(&mut terminal, &mut app, reload_rx);
+    let result = event_loop(&mut terminal, &mut app, live_watch);
 
     {
         let mut out = io::stdout().lock();
@@ -420,16 +480,16 @@ fn run_ui(
 fn event_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
-    reload_rx: Option<std::sync::mpsc::Receiver<()>>,
+    mut live_watch: Option<LiveWatch>,
 ) -> io::Result<()> {
     loop {
         // Live reload: drain any pending file-change notifications, coalescing
         // the burst of events a single save produces into one reload. Checked
         // every iteration (not just when a key arrives) so a save with no
         // keyboard activity still triggers within one ~50ms tick.
-        if let Some(rx) = &reload_rx {
+        if let Some(lw) = &live_watch {
             let mut changed = false;
-            while rx.try_recv().is_ok() {
+            while lw.rx.try_recv().is_ok() {
                 changed = true;
             }
             if changed {
@@ -499,6 +559,7 @@ fn event_loop<B: Backend>(
                 app.needs_full_redraw = true;
                 continue;
             }
+            let cursor_before = app.cursor;
             match &mut app.mode {
                 Mode::Normal => handle_normal_key(app, &ev)?,
                 Mode::Search { .. } => handle_search_key(app, ev)?,
@@ -507,6 +568,13 @@ fn event_loop<B: Backend>(
             }
             if app.should_quit {
                 return Ok(());
+            }
+            // If navigation (link / back / forward) switched the active doc,
+            // re-point the watcher so live reload follows the doc on screen.
+            if app.cursor != cursor_before {
+                if let Some(lw) = &mut live_watch {
+                    lw.retarget(&app.active().path);
+                }
             }
             // Scroll / mode-change / search events rely on ratatui's cell
             // diff + `images.sync()` for correctness — no full clear. Only

@@ -272,20 +272,38 @@ fn draw_raster_glyph(
 // ─── Heading Rendering ──────────────────────────────────────────────────────
 
 /// Process-global cache of rasterized heading PNGs, keyed on
-/// `(level, theme, text)`. Rasterization (glyph drawing + PNG encoding) is the
-/// dominant cost of a render, so live-reload re-renders only headings whose
-/// text actually changed — everything else is served from here. Font config is
-/// **not** part of the key: it is loaded once at startup and constant for the
-/// process, so within a session `(level, theme, text)` fully determines the
-/// image. Mirrors the `FONT_DATA_CACHE` pattern in `font.rs`.
+/// `(level, theme, font fingerprint, text)`. Rasterization (glyph drawing + PNG
+/// encoding) is the dominant cost of a render, so live-reload re-renders only
+/// headings whose text actually changed — everything else is served from here.
+/// The configured heading fonts are folded into the key via
+/// [`font_fingerprint`]: a normal CLI run has one constant config, but keying on
+/// it keeps the global cache correct if the same text is ever rendered under
+/// different font configs in one process (e.g. shared test runs, or future
+/// library use). Mirrors the `FONT_DATA_CACHE` pattern in `font.rs`.
 /// Rasterized heading: PNG bytes plus pixel `(width, height)`.
 type RenderedHeading = (Vec<u8>, u32, u32);
-type HeadingCacheKey = (u8, Theme, String);
+/// `(level, theme, font fingerprint, text)` — see [`HEADING_CACHE`].
+type HeadingCacheKey = (u8, Theme, String, String);
 static HEADING_CACHE: OnceLock<Mutex<HashMap<HeadingCacheKey, RenderedHeading>>> = OnceLock::new();
 
 /// Soft cap so a long editing session that churns through many distinct
 /// heading texts can't grow the cache without bound. Each entry is a few KB.
 const HEADING_CACHE_CAP: usize = 1024;
+
+/// Fold the configured heading fonts into a single stable string so the heading
+/// cache key distinguishes renders made under different font configs. The unit
+/// separator (`\u{1f}`) can't appear in a font name, so the three slots never
+/// collide. Resolved platform defaults aren't included: they're constant for
+/// the process, so an all-unset config is correctly shared.
+fn font_fingerprint(config: &Config) -> String {
+    let h = &config.font.heading;
+    format!(
+        "{}\u{1f}{}\u{1f}{}",
+        h.latin.as_deref().unwrap_or(""),
+        h.cjk.as_deref().unwrap_or(""),
+        h.emoji.as_deref().unwrap_or(""),
+    )
+}
 
 /// Render heading text to a PNG image. Returns `None` if font loading or
 /// PNG encoding fails (caller should fall back to ANSI text).
@@ -305,7 +323,7 @@ pub fn render_heading(
     theme: Theme,
 ) -> Option<(Vec<u8>, u32, u32)> {
     let cache = HEADING_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let key: HeadingCacheKey = (level, theme, text.to_owned());
+    let key: HeadingCacheKey = (level, theme, font_fingerprint(config), text.to_owned());
     if let Ok(map) = cache.lock() {
         if let Some(hit) = map.get(&key) {
             return Some(hit.clone());
@@ -561,17 +579,18 @@ mod heading_cache_tests {
     use crate::config::Config;
 
     #[test]
-    fn render_heading_is_cached_keyed_by_level_theme_text() {
+    fn render_heading_is_cached_keyed_by_level_theme_font_text() {
         let cfg = Config::default();
+        let fp = font_fingerprint(&cfg);
         // A unique string so this test never aliases another's cache entry.
         let text = "Heading Cache Probe — δοκιμή 测试";
 
         let first = render_heading(text, 1, &cfg, Theme::Dark).expect("heading should render");
 
-        // The (level, theme, text) key is now memoized.
+        // The (level, theme, font, text) key is now memoized.
         {
             let map = HEADING_CACHE.get().unwrap().lock().unwrap();
-            assert!(map.contains_key(&(1u8, Theme::Dark, text.to_owned())));
+            assert!(map.contains_key(&(1u8, Theme::Dark, fp.clone(), text.to_owned())));
         }
 
         // A second call returns the identical bytes (served from cache).
@@ -581,6 +600,20 @@ mod heading_cache_tests {
         // Theme is part of the key: a different theme is a distinct entry.
         let _light = render_heading(text, 1, &cfg, Theme::Light).expect("heading should render");
         let map = HEADING_CACHE.get().unwrap().lock().unwrap();
-        assert!(map.contains_key(&(1u8, Theme::Light, text.to_owned())));
+        assert!(map.contains_key(&(1u8, Theme::Light, fp, text.to_owned())));
+    }
+
+    #[test]
+    fn font_fingerprint_distinguishes_configs() {
+        let mut a = Config::default();
+        a.font.heading.latin = Some("Inter".to_string());
+        let mut b = Config::default();
+        b.font.heading.latin = Some("Charter".to_string());
+        assert_ne!(font_fingerprint(&a), font_fingerprint(&b));
+        // An all-unset config is stable and shared.
+        assert_eq!(
+            font_fingerprint(&Config::default()),
+            font_fingerprint(&Config::default())
+        );
     }
 }
