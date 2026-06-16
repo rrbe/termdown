@@ -15,6 +15,7 @@ termdown [OPTIONS] [FILE]
 | `--cat` | Force non-interactive cat-style output (pipe-friendly). |
 | `--theme <auto\|dark\|light>` | Color theme. Default `auto` detects the terminal background via OSC 11. |
 | `--no-bell` | Disable the edge-scroll terminal bell (also `bell = false` in config). |
+| `-w`, `--watch` | Watch the file and live-reload the TUI on save (also `watch = true` in config). TUI only. |
 | `-h`, `--help` | Show help. |
 | `-V`, `--version` | Show version. |
 
@@ -41,12 +42,26 @@ termdown --theme light README.md
 
 # Disable the edge-scroll bell
 termdown --no-bell README.md
+
+# Live preview: edit in your editor, watch it re-render on save
+termdown --watch notes.md
 ```
 
 ## TUI mode
 
 The TUI launches automatically whenever you pass a file and stdout is a real
 terminal. It requires a file path; stdin input is not supported.
+
+### Live reload (`--watch`)
+
+`termdown --watch FILE` re-renders the preview whenever the file changes on
+disk — ideal for a two-pane workflow: edit the Markdown in your editor (e.g.
+vim) on one side, keep `termdown --watch` open on the other. Scroll position,
+the open/closed Table of Contents, the metadata fold state, and any active
+search are preserved across reloads. A `[watch]` marker appears in the status
+bar. Editor atomic saves (write-temp-then-rename) are handled. Rasterized
+headings are cached, so a save that only touches body text re-renders almost
+instantly; only headings whose text actually changed are re-rasterized.
 
 | Key | Action |
 |---|---|
@@ -90,6 +105,10 @@ bell = true
 # expands it. When false, metadata is hidden (still parsed, never leaks
 # into body content).
 metadata = true
+
+# Watch the file and live-reload the preview on save. Default false. TUI only.
+# CLI: `--watch` / `-w`.
+watch = false
 
 [font.heading]
 # English heading font (sans-serif recommended)

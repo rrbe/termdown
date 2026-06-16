@@ -12,6 +12,9 @@ pub struct MatchPos {
 }
 
 pub struct SearchState {
+    /// The committed query string, retained so the match set can be rebuilt
+    /// against new content after a live reload.
+    pub query: String,
     pub matches: Vec<MatchPos>,
     pub current: Option<usize>,
 }
@@ -19,6 +22,7 @@ pub struct SearchState {
 impl SearchState {
     pub fn new(query: &str, doc: &RenderedDoc) -> Self {
         Self {
+            query: query.to_string(),
             matches: find_all(query, doc),
             current: None,
         }

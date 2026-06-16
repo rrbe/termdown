@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use ab_glyph::{point, Font, GlyphId, GlyphImageFormat, PxScale, ScaleFont};
 use base64::Engine;
 use image::codecs::png::PngEncoder;
@@ -268,18 +271,47 @@ fn draw_raster_glyph(
 
 // ─── Heading Rendering ──────────────────────────────────────────────────────
 
+/// Process-global cache of rasterized heading PNGs, keyed on
+/// `(level, theme, text)`. Rasterization (glyph drawing + PNG encoding) is the
+/// dominant cost of a render, so live-reload re-renders only headings whose
+/// text actually changed — everything else is served from here. Font config is
+/// **not** part of the key: it is loaded once at startup and constant for the
+/// process, so within a session `(level, theme, text)` fully determines the
+/// image. Mirrors the `FONT_DATA_CACHE` pattern in `font.rs`.
+/// Rasterized heading: PNG bytes plus pixel `(width, height)`.
+type RenderedHeading = (Vec<u8>, u32, u32);
+type HeadingCacheKey = (u8, Theme, String);
+static HEADING_CACHE: OnceLock<Mutex<HashMap<HeadingCacheKey, RenderedHeading>>> = OnceLock::new();
+
+/// Soft cap so a long editing session that churns through many distinct
+/// heading texts can't grow the cache without bound. Each entry is a few KB.
+const HEADING_CACHE_CAP: usize = 1024;
+
 /// Render heading text to a PNG image. Returns `None` if font loading or
 /// PNG encoding fails (caller should fall back to ANSI text).
 ///
 /// Returns the PNG bytes and the image's pixel dimensions `(width, height)`.
 /// The TUI needs the pixel height to compute how many terminal rows the image
 /// occupies (`ceil(height / cell_pixel_height)`); cat mode ignores it.
+///
+/// Results are memoized in [`HEADING_CACHE`]; a cache hit skips all
+/// rasterization. The lock is held only for the brief get / insert, never
+/// across the expensive rasterization, so distinct headings still rasterize in
+/// parallel under `layout::build`'s rayon `par_iter`.
 pub fn render_heading(
     text: &str,
     level: u8,
     config: &Config,
     theme: Theme,
 ) -> Option<(Vec<u8>, u32, u32)> {
+    let cache = HEADING_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key: HeadingCacheKey = (level, theme, text.to_owned());
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            return Some(hit.clone());
+        }
+    }
+
     let st = style::heading_style(level, theme);
     let fonts = font::get_fonts(level, config)?;
     let scale = PxScale {
@@ -315,7 +347,15 @@ pub fn render_heading(
     PngEncoder::new(&mut buf)
         .write_image(img.as_raw(), img_w, img_h, image::ExtendedColorType::Rgba8)
         .ok()?;
-    Some((buf, img_w, img_h))
+
+    let result = (buf, img_w, img_h);
+    if let Ok(mut map) = cache.lock() {
+        if map.len() >= HEADING_CACHE_CAP {
+            map.clear();
+        }
+        map.insert(key, result.clone());
+    }
+    Some(result)
 }
 
 // ─── Kitty Graphics Protocol ────────────────────────────────────────────────
@@ -512,5 +552,35 @@ mod kitty_tests {
         delete_all_for_client(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert_eq!(s, "\x1b_Ga=d,d=A,q=2;\x1b\\");
+    }
+}
+
+#[cfg(test)]
+mod heading_cache_tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn render_heading_is_cached_keyed_by_level_theme_text() {
+        let cfg = Config::default();
+        // A unique string so this test never aliases another's cache entry.
+        let text = "Heading Cache Probe — δοκιμή 测试";
+
+        let first = render_heading(text, 1, &cfg, Theme::Dark).expect("heading should render");
+
+        // The (level, theme, text) key is now memoized.
+        {
+            let map = HEADING_CACHE.get().unwrap().lock().unwrap();
+            assert!(map.contains_key(&(1u8, Theme::Dark, text.to_owned())));
+        }
+
+        // A second call returns the identical bytes (served from cache).
+        let second = render_heading(text, 1, &cfg, Theme::Dark).expect("heading should render");
+        assert_eq!(first, second, "cached render must be byte-identical");
+
+        // Theme is part of the key: a different theme is a distinct entry.
+        let _light = render_heading(text, 1, &cfg, Theme::Light).expect("heading should render");
+        let map = HEADING_CACHE.get().unwrap().lock().unwrap();
+        assert!(map.contains_key(&(1u8, Theme::Light, text.to_owned())));
     }
 }

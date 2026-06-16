@@ -95,6 +95,9 @@ cat notes.md | termdown
 # 指定主题；查看帮助
 termdown --theme light README.md
 termdown --help
+
+# 实时预览：保存即重新渲染（在编辑器里改，在这里看）
+termdown --watch notes.md
 ```
 
 完整的命令行参数、TUI 快捷键、配置项和已知问题都在 **[使用指南](docs/USAGE_CN.md)**。配置是可选的，位于 `~/.config/termdown/config.toml` —— 全部默认值见 [`config.example.toml`](config.example.toml)。

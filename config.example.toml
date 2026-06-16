@@ -24,6 +24,11 @@ bell = true
 # (it is still parsed, so it never leaks into body content).
 metadata = true
 
+# Watch the file and live-reload the preview when it changes on disk. Default
+# false. Useful for "edit in your editor, preview in termdown" side by side.
+# Only applies to the interactive TUI. CLI override: --watch / -w.
+watch = false
+
 [font.heading]
 # Fonts for image-rendered headings (H1–H3). When unset, termdown uses
 # platform defaults and falls back to an embedded SourceSerif4 font. Body

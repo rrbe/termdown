@@ -27,6 +27,7 @@ base64 = "0.22"
 crossterm = "0.28"
 font-kit = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
+notify = "8"
 pulldown-cmark = "0.13"
 ratatui = "0.29"
 rayon = "1"

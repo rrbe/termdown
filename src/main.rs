@@ -35,6 +35,7 @@ fn main() {
         println!("  --theme <auto|dark|light>  Color theme (default: auto-detect)");
         println!("  --cat                     Force non-interactive cat-style output");
         println!("  --no-bell                 Disable the edge-scroll terminal bell");
+        println!("  -w, --watch               Watch the file and live-reload on save (TUI only)");
         println!();
         println!("By default, passing FILE opens it in the interactive TUI.");
         println!("Piped/redirected stdout and stdin input automatically use cat mode.");
@@ -50,12 +51,16 @@ fn main() {
 
     let cat_flag = args.iter().any(|a| a == "--cat");
     let no_bell_flag = args.iter().any(|a| a == "--no-bell");
+    let watch_flag = args.iter().any(|a| a == "--watch" || a == "-w");
 
     check_terminal_support();
 
     let mut config = config::load();
     if no_bell_flag {
         config.bell = Some(false);
+    }
+    if watch_flag {
+        config.watch = Some(true);
     }
 
     // Parse --theme flag (takes precedence over config). An unrecognized value
@@ -100,9 +105,17 @@ fn main() {
     let want_tui =
         !cat_flag && matches!(file_arg.as_deref(), Some(p) if p != "-") && io::stdout().is_tty();
 
+    // Watching only makes sense for the interactive TUI: cat mode renders once
+    // and stdin has no path to re-read. Warn only when the user explicitly
+    // asked for it via the flag (a config `watch = true` stays silent).
+    if watch_flag && !want_tui {
+        eprintln!("termdown: --watch only applies to the interactive TUI; ignoring");
+    }
+
     if want_tui {
         let path = file_arg.expect("want_tui implies a file path");
-        tui::run(&path, &config, theme);
+        let watch = config.watch.unwrap_or(false);
+        tui::run(&path, &config, theme, watch);
         return;
     }
 
