@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(level, theme, text)`, so a live reload re-rasterizes only headings whose
   text actually changed — a body-only edit re-renders near-instantly.
 
+### Changed
+- **Install & release now use [`dist`](https://github.com/axodotdev/cargo-dist)
+  (cargo-dist).** Releases ship a one-line shell installer (macOS/Linux) and a
+  PowerShell installer (Windows), plus
+  [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)-compatible
+  archives — updating is just re-running the install command. Publishing to
+  crates.io is unchanged (kept as a standalone workflow).
+
+### Removed
+- The hand-written `install.sh` / `uninstall.sh` scripts, superseded by the
+  `dist`-generated installers. `cargo install`, `cargo binstall`, and manual
+  archive download all still work.
+
 ## [0.6.1] - 2026-06-08
 
 ### Fixed

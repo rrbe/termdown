@@ -43,11 +43,25 @@ Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 
 ### Prebuilt binary (no Rust toolchain needed)
 
+**macOS / Linux:**
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.sh | sh
 ```
 
-Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTALL_DIR`.
+**Windows (PowerShell):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.ps1 | iex"
+```
+
+Installs `termdown` into `~/.cargo/bin` and adds it to your `PATH`. **To update, just re-run the same command.**
+
+Or, with [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) (fetches the prebuilt binary, no compile):
+
+```sh
+cargo binstall termdown
+```
 
 <details>
 <summary>Manual download (no script)</summary>
@@ -56,12 +70,12 @@ Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTA
 TARGET=aarch64-apple-darwin
 BASE="https://github.com/rrbe/termdown/releases/latest/download"
 
-curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
-curl -LO "${BASE}/SHA256SUMS"
-grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz"
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz.sha256"
+shasum -a 256 -c "termdown-${TARGET}.tar.xz.sha256"
 
-tar xzf "termdown-${TARGET}.tar.gz"
-sudo mv termdown /usr/local/bin/
+tar xf "termdown-${TARGET}.tar.xz"
+sudo mv "termdown-${TARGET}/termdown" /usr/local/bin/
 ```
 
 </details>
@@ -75,18 +89,9 @@ cargo install --git https://github.com/rrbe/termdown
 ## Uninstall
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
-```
-
-<details>
-<summary>Manual uninstall</summary>
-
-```sh
 rm $(which termdown)
 rm -rf ~/.config/termdown
 ```
-
-</details>
 
 ## Usage
 

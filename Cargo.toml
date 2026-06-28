@@ -16,9 +16,8 @@ exclude = [
     "TODO.md",
     "docs/",
     ".github/",
-    "install.sh",
-    "uninstall.sh",
     "Cross.toml",
+    "dist-workspace.toml",
 ]
 
 [dependencies]
@@ -52,3 +51,8 @@ font-kit = { version = "0.14", features = ["source-fontconfig-dlopen"] }
 [profile.release]
 strip = true
 lto = true
+
+# The profile that 'dist' builds release binaries with. Inherit the release
+# profile verbatim (fat LTO + strip) so published binaries match `cargo install`.
+[profile.dist]
+inherits = "release"

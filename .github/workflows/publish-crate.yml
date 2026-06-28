@@ -1,0 +1,36 @@
+name: Publish to crates.io
+
+# dist's release.yml builds the cross-platform binaries + installers and creates
+# the GitHub Release. It does NOT publish to crates.io, so this standalone
+# workflow keeps the `cargo publish` step alive. Both trigger on the same vX.Y.Z
+# tag push and run independently.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          [ "$TAG_VERSION" = "$CARGO_VERSION" ] || { echo "Tag $TAG_VERSION != Cargo $CARGO_VERSION"; exit 1; }
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
