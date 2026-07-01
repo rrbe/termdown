@@ -20,7 +20,10 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfontconfig1
+          mkdir -p "$RUNNER_TEMP/empty-pkgconfig"
+          echo "PKG_CONFIG_LIBDIR=$RUNNER_TEMP/empty-pkgconfig" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
 

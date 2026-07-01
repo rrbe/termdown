@@ -40,7 +40,7 @@ cargo install termdown
 **macOS / Linux：**
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
 **Windows（PowerShell）：**
@@ -49,7 +49,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rrbe/termdown/releases/
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.ps1 | iex"
 ```
 
-会把 `termdown` 装到 `~/.cargo/bin` 并加入 `PATH`。**更新时重跑同一条命令即可。**
+macOS/Linux 命令是一个兼容包装脚本：同时支持新的 cargo-dist archive
+布局和旧 archive 布局。Windows installer 在使用 cargo-dist 构建的
+release 中可用。**更新时重跑安装命令即可。**
 
 或用 [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)（直接拉预编译二进制，免编译）：
 
@@ -81,6 +83,20 @@ cargo install --git https://github.com/rrbe/termdown
 ```
 
 ## 卸载
+
+如果是从 crates.io 安装：
+
+```sh
+cargo uninstall termdown
+```
+
+如果是通过 shell 安装脚本安装：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
+```
+
+手动清理：
 
 ```sh
 rm $(which termdown)

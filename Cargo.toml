@@ -16,6 +16,8 @@ exclude = [
     "TODO.md",
     "docs/",
     ".github/",
+    "install.sh",
+    "uninstall.sh",
     "Cross.toml",
     "dist-workspace.toml",
 ]

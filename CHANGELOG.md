@@ -27,11 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)-compatible
   archives — updating is just re-running the install command. Publishing to
   crates.io is unchanged (kept as a standalone workflow).
-
-### Removed
-- The hand-written `install.sh` / `uninstall.sh` scripts, superseded by the
-  `dist`-generated installers. `cargo install`, `cargo binstall`, and manual
-  archive download all still work.
+- The repository `install.sh` is now a compatibility wrapper: it understands
+  both cargo-dist archives and the legacy archive layout, so the README install
+  command stays valid before and after the first cargo-dist release.
 
 ## [0.6.1] - 2026-06-08
 

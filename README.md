@@ -46,7 +46,7 @@ Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 **macOS / Linux:**
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
 **Windows (PowerShell):**
@@ -55,7 +55,10 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/rrbe/termdown/releases/
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.ps1 | iex"
 ```
 
-Installs `termdown` into `~/.cargo/bin` and adds it to your `PATH`. **To update, just re-run the same command.**
+The macOS/Linux command is a compatibility wrapper: it understands both the new
+cargo-dist archive layout and the legacy archive layout. The Windows installer
+is available on releases built with cargo-dist. **To update, just re-run the
+install command.**
 
 Or, with [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) (fetches the prebuilt binary, no compile):
 
@@ -87,6 +90,20 @@ cargo install --git https://github.com/rrbe/termdown
 ```
 
 ## Uninstall
+
+If you installed from crates.io:
+
+```sh
+cargo uninstall termdown
+```
+
+If you installed from the shell installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
+```
+
+Manual cleanup:
 
 ```sh
 rm $(which termdown)
