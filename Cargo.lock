@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "termdown"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "ab_glyph",
  "base64",

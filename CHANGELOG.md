@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-07-30
 
 ### Added
 - **Live reload (`--watch` / `-w`).** `termdown --watch FILE` watches the file
@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Heading-image cache.** Rasterized H1–H3 heading PNGs are memoized by
   `(level, theme, text)`, so a live reload re-rasterizes only headings whose
   text actually changed — a body-only edit re-renders near-instantly.
+
+### Fixed
+- **TUI headings remain visible while scrolling in iTerm2.** Heading placements
+  are now replaced in place, and off-screen placements no longer evict cached
+  image data.
+- **iTerm2 Kitty responses no longer leak into TUI input.** Protocol responses
+  are filtered before key dispatch, preventing them from triggering commands.
 
 ## [0.6.1] - 2026-06-08
 
@@ -151,6 +158,8 @@ First release published to [crates.io](https://crates.io/crates/termdown).
 Initial release: direct-output Markdown renderer with H1–H3 headings
 rasterized to PNG and painted via the Kitty graphics protocol.
 
+[0.7.0]: https://github.com/rrbe/termdown/releases/tag/v0.7.0
+[0.6.1]: https://github.com/rrbe/termdown/releases/tag/v0.6.1
 [0.6.0]: https://github.com/rrbe/termdown/releases/tag/v0.6.0
 [0.5.1]: https://github.com/rrbe/termdown/releases/tag/v0.5.1
 [0.5.0]: https://github.com/rrbe/termdown/releases/tag/v0.5.0
