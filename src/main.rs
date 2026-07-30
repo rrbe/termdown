@@ -146,7 +146,7 @@ fn main() {
     // we don't trip Ghostty's Secure Keyboard Entry auto-enable heuristic,
     // which treats `~ECHO` as a password prompt.
     #[cfg(unix)]
-    let saved_termios = needs_echo_suppression().then(disable_echo);
+    let saved_termios = is_iterm2().then(disable_echo);
 
     let doc = layout::build(&md, &config, theme);
     cat::print(&doc, term_width, &colors, &config);
@@ -184,8 +184,7 @@ fn check_terminal_support() {
 
 // ─── UNIX Terminal State ────────────────────────────────────────────────────
 
-#[cfg(unix)]
-fn needs_echo_suppression() -> bool {
+fn is_iterm2() -> bool {
     std::env::var("TERM_PROGRAM")
         .map(|v| v.eq_ignore_ascii_case("iTerm.app"))
         .unwrap_or(false)
