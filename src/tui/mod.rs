@@ -41,6 +41,48 @@ enum Mode {
     Help,
 }
 
+enum KittyResponseState {
+    Idle,
+    Prefix,
+    Payload,
+}
+
+impl KittyResponseState {
+    /// iTerm2 ignores Kitty's `q=2` and writes `ESC_G...ESC\` responses to
+    /// stdin. Crossterm 0.28 exposes that APC as Alt+_, G, payload, Alt+\ key
+    /// events; consume the sequence before `G` reaches the jump-to-end binding.
+    fn consume(&mut self, event: &Event) -> bool {
+        let Event::Key(key) = event else {
+            return false;
+        };
+        let alt_char = |ch| {
+            key.code == event::KeyCode::Char(ch) && key.modifiers.contains(event::KeyModifiers::ALT)
+        };
+
+        match self {
+            Self::Idle if alt_char('_') => {
+                *self = Self::Prefix;
+                true
+            }
+            Self::Prefix if key.code == event::KeyCode::Char('G') => {
+                *self = Self::Payload;
+                true
+            }
+            Self::Prefix => {
+                *self = Self::Idle;
+                false
+            }
+            Self::Payload => {
+                if alt_char('\\') || key.code == event::KeyCode::Char('\\') {
+                    *self = Self::Idle;
+                }
+                true
+            }
+            Self::Idle => false,
+        }
+    }
+}
+
 /// A single loaded document with its own view state. `App` holds a stack of
 /// these so the user can follow local `.md` links and navigate back/forward.
 struct DocEntry {
@@ -85,6 +127,7 @@ struct App {
     /// Whether live-reload watching is active for this session. Drives the
     /// status-bar indicator; the watcher itself lives in `run_ui`/`event_loop`.
     watch: bool,
+    kitty_response: Option<KittyResponseState>,
 }
 
 impl App {
@@ -111,6 +154,7 @@ impl App {
             cell_px_height: 0,
             needs_full_redraw: true,
             watch: false,
+            kitty_response: crate::is_iterm2().then_some(KittyResponseState::Idle),
         };
         app.push_new_doc(path, doc);
         app
@@ -568,6 +612,13 @@ fn event_loop<B: Backend>(
 
         if event::poll(Duration::from_millis(50))? {
             let ev = event::read()?;
+            if app
+                .kitty_response
+                .as_mut()
+                .is_some_and(|state| state.consume(&ev))
+            {
+                continue;
+            }
             // Resize is the one event crossterm surfaces that must trigger a
             // full redraw regardless of mode.
             if matches!(ev, Event::Resize(_, _)) {
@@ -1727,6 +1778,32 @@ mod open_link_tests {
         assert!(!looks_like_local_md("file:///a.md"));
         assert!(!looks_like_local_md("other.txt"));
         assert!(!looks_like_local_md(""));
+    }
+}
+
+#[cfg(test)]
+mod kitty_response_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(ch: char, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent::new(KeyCode::Char(ch), modifiers))
+    }
+
+    #[test]
+    fn consumes_iterm2_kitty_response_without_eating_real_keys() {
+        let mut state = KittyResponseState::Idle;
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT)));
+        assert!(state.consume(&key('G', KeyModifiers::SHIFT)));
+        for ch in "i=1,p=1;OK".chars() {
+            assert!(state.consume(&key(ch, KeyModifiers::NONE)));
+        }
+        assert!(state.consume(&key('\\', KeyModifiers::ALT)));
+        assert!(!state.consume(&key('G', KeyModifiers::SHIFT)));
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT)));
+        assert!(!state.consume(&key('j', KeyModifiers::NONE)));
     }
 }
 
