@@ -29,9 +29,8 @@ impl ImageLifecycle {
 
     /// Diff `desired` against `placed`, emit delete/place commands to reconcile.
     ///
-    /// For ids whose position changed, Kitty treats a second `place` as
-    /// stacking a new placement rather than moving — so a `delete_placement`
-    /// is always required first when an id's (col, row) differs.
+    /// Each image uses its globally-unique id as its placement id, so placing
+    /// it again at a new position moves the existing placement.
     pub fn sync<W: Write>(
         &mut self,
         w: &mut W,
@@ -56,7 +55,6 @@ impl ImageLifecycle {
                     // unchanged
                 }
                 Some(_) => {
-                    render::delete_placement(w, id)?;
                     render::place(w, id, col, row)?;
                     self.placed.insert(id, (col, row));
                 }
@@ -131,25 +129,21 @@ mod tests {
         desired.insert(1u32, (5u16, 10u16));
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf.clone()).unwrap();
-        // New format: CUP (1-indexed row+1=11, col+1=6) followed by a=p,i=1.
+        // CUP (1-indexed row+1=11, col+1=6) followed by image + placement ids.
         assert!(
-            s.contains("\x1b[11;6H") && s.contains("a=p,i=1"),
+            s.contains("\x1b[11;6H") && s.contains("a=p,i=1,p=1"),
             "expected initial place, got: {s:?}"
         );
         assert!(!s.contains("a=d,d=i,i=1"), "no delete expected: {s:?}");
 
-        // Move to (5, 8) — needs delete + place.
+        // Move to (5, 8) — replacing the same placement id needs no delete.
         desired.insert(1, (5, 8));
         buf.clear();
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf.clone()).unwrap();
+        assert!(!s.contains("a=d,d=i,i=1"), "no delete expected: {s:?}");
         assert!(
-            s.contains("a=d,d=i,i=1"),
-            "expected delete before move: {s:?}"
-        );
-        // New format: CUP (1-indexed row+1=9, col+1=6) followed by a=p,i=1.
-        assert!(
-            s.contains("\x1b[9;6H") && s.contains("a=p,i=1"),
+            s.contains("\x1b[9;6H") && s.contains("a=p,i=1,p=1"),
             "expected re-place at new pos: {s:?}"
         );
 
@@ -163,7 +157,7 @@ mod tests {
         buf.clear();
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("a=d,d=i,i=1"));
+        assert!(s.contains("a=d,d=i,i=1,p=1"));
         assert!(!s.contains("a=p,i=1"), "no place expected on leave: {s:?}");
     }
 
