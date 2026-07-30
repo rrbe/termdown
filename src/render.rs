@@ -465,6 +465,9 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
 /// cursor position; the `x` and `y` APC keys are source-image pixel offsets
 /// (for cropping), not terminal cell coordinates.
 ///
+/// The placement id matches the globally-unique image id. Reusing that pair
+/// moves the existing placement instead of stacking another copy.
+///
 /// The `C=1` flag tells Kitty to NOT advance the cursor after placement.
 /// Without it, placing a tall image near the bottom of the screen would
 /// push the cursor past the last row, causing the terminal to scroll the
@@ -474,7 +477,7 @@ pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Resul
     // CUP (cursor position) is 1-indexed: row+1, col+1.
     write!(
         w,
-        "\x1b[{};{}H\x1b_Ga=p,i={id},C=1,q=2;\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},C=1,q=2;\x1b\\",
         row + 1,
         col + 1
     )
@@ -483,7 +486,7 @@ pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Resul
 /// Delete a single placement of `id`. Keeps the cached image data so future
 /// `place` calls on the same id are cheap.
 pub fn delete_placement<W: Write>(w: &mut W, id: u32) -> std::io::Result<()> {
-    write!(w, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")
+    write!(w, "\x1b_Ga=d,d=i,i={id},p={id},q=2;\x1b\\")
 }
 
 /// Delete all placements and image data this client has created. Used at
@@ -551,17 +554,17 @@ mod kitty_tests {
         let mut buf = Vec::new();
         place(&mut buf, 7, 3, 5).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        // Cursor move is 1-indexed (row+1, col+1), then place by id with
-        // C=1 so kitty doesn't advance the cursor after placement.
-        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,C=1,q=2;\x1b\\");
+        // Cursor move is 1-indexed (row+1, col+1), then place by image and
+        // placement id with C=1 so kitty doesn't advance the cursor.
+        assert_eq!(s, "\x1b[6;4H\x1b_Ga=p,i=7,p=7,C=1,q=2;\x1b\\");
     }
 
     #[test]
-    fn delete_placement_sends_d_i() {
+    fn delete_placement_preserves_cached_image() {
         let mut buf = Vec::new();
         delete_placement(&mut buf, 9).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert_eq!(s, "\x1b_Ga=d,d=i,i=9,q=2;\x1b\\");
+        assert_eq!(s, "\x1b_Ga=d,d=i,i=9,p=9,q=2;\x1b\\");
     }
 
     #[test]
