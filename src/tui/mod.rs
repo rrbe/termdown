@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -495,7 +495,7 @@ fn run_ui(
 ) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    crossterm::execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
@@ -545,7 +545,11 @@ fn run_ui(
     }
 
     disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        DisableFocusChange,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
 }
@@ -633,9 +637,9 @@ fn event_loop<B: Backend>(
             {
                 continue;
             }
-            // Resize is the one event crossterm surfaces that must trigger a
-            // full redraw regardless of mode.
-            if matches!(ev, Event::Resize(_, _)) {
+            // A resize invalidates layout; regaining focus may mean the
+            // terminal rebuilt its graphics layer while the screen was locked.
+            if requires_full_redraw(&ev) {
                 app.needs_full_redraw = true;
                 continue;
             }
@@ -664,6 +668,21 @@ fn event_loop<B: Backend>(
             // rates (~30 Hz) because each frame emits `\x1b[2J` + re-uploads
             // every heading PNG.
         }
+    }
+}
+
+fn requires_full_redraw(ev: &Event) -> bool {
+    matches!(ev, Event::Resize(_, _) | Event::FocusGained)
+}
+
+#[cfg(test)]
+mod redraw_event_tests {
+    use super::*;
+
+    #[test]
+    fn focus_gain_requires_full_redraw() {
+        assert!(requires_full_redraw(&Event::FocusGained));
+        assert!(!requires_full_redraw(&Event::FocusLost));
     }
 }
 
