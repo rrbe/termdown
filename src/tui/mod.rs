@@ -1763,7 +1763,7 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     // iteration and matches the row count used by draw() + the viewport.
     let body_height = active.viewport.height;
     for (visual_row, vl) in active.viewport.visible().iter().enumerate() {
-        if vl.is_spacer || vl.byte_start != 0 {
+        if vl.logical_index == viewport::NO_LOGICAL || vl.is_spacer || vl.byte_start != 0 {
             continue;
         }
         let logical = &active.doc.lines[vl.logical_index];
@@ -1851,6 +1851,7 @@ mod kitty_response_tests {
 #[cfg(test)]
 mod renumber_tests {
     use super::*;
+    use crate::frontmatter::{MetadataInfo, MetadataKind};
     use crate::layout::{Line, LineKind, RenderedDoc, Span};
 
     fn heading_doc() -> RenderedDoc {
@@ -1917,6 +1918,30 @@ mod renumber_tests {
         let mut next = 9;
         renumber_doc_images(&mut doc, &mut next);
         assert_eq!(next, 9);
+    }
+
+    #[test]
+    fn image_placements_ignore_metadata_rows() {
+        let mut doc = heading_doc();
+        doc.metadata = Some(MetadataInfo {
+            kind: MetadataKind::Yaml,
+            pairs: vec![("title".into(), "T".into())],
+            fallback_oneline: String::new(),
+        });
+        let mut app = App::new_with_initial_doc(
+            "fixture.md".into(),
+            doc,
+            10,
+            40,
+            Config::default(),
+            Theme::Dark,
+        );
+        let active = app.active_mut();
+        active.viewport.ensure_wrap(&active.doc, true, false);
+
+        let placements = desired_image_placements(&app);
+        assert_eq!(placements.get(&1), Some(&(0, 2)));
+        assert_eq!(placements.get(&2), Some(&(0, 5)));
     }
 }
 
