@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -495,7 +495,7 @@ fn run_ui(
 ) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    crossterm::execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
@@ -545,7 +545,11 @@ fn run_ui(
     }
 
     disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        DisableFocusChange,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
 }
@@ -633,9 +637,9 @@ fn event_loop<B: Backend>(
             {
                 continue;
             }
-            // Resize is the one event crossterm surfaces that must trigger a
-            // full redraw regardless of mode.
-            if matches!(ev, Event::Resize(_, _)) {
+            // A resize invalidates layout; regaining focus may mean the
+            // terminal rebuilt its graphics layer while the screen was locked.
+            if requires_full_redraw(&ev) {
                 app.needs_full_redraw = true;
                 continue;
             }
@@ -664,6 +668,21 @@ fn event_loop<B: Backend>(
             // rates (~30 Hz) because each frame emits `\x1b[2J` + re-uploads
             // every heading PNG.
         }
+    }
+}
+
+fn requires_full_redraw(ev: &Event) -> bool {
+    matches!(ev, Event::Resize(_, _) | Event::FocusGained)
+}
+
+#[cfg(test)]
+mod redraw_event_tests {
+    use super::*;
+
+    #[test]
+    fn focus_gain_requires_full_redraw() {
+        assert!(requires_full_redraw(&Event::FocusGained));
+        assert!(!requires_full_redraw(&Event::FocusLost));
     }
 }
 
@@ -1744,7 +1763,7 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
     // iteration and matches the row count used by draw() + the viewport.
     let body_height = active.viewport.height;
     for (visual_row, vl) in active.viewport.visible().iter().enumerate() {
-        if vl.is_spacer || vl.byte_start != 0 {
+        if vl.logical_index == viewport::NO_LOGICAL || vl.is_spacer || vl.byte_start != 0 {
             continue;
         }
         let logical = &active.doc.lines[vl.logical_index];
@@ -1832,6 +1851,7 @@ mod kitty_response_tests {
 #[cfg(test)]
 mod renumber_tests {
     use super::*;
+    use crate::frontmatter::{MetadataInfo, MetadataKind};
     use crate::layout::{Line, LineKind, RenderedDoc, Span};
 
     fn heading_doc() -> RenderedDoc {
@@ -1898,6 +1918,30 @@ mod renumber_tests {
         let mut next = 9;
         renumber_doc_images(&mut doc, &mut next);
         assert_eq!(next, 9);
+    }
+
+    #[test]
+    fn image_placements_ignore_metadata_rows() {
+        let mut doc = heading_doc();
+        doc.metadata = Some(MetadataInfo {
+            kind: MetadataKind::Yaml,
+            pairs: vec![("title".into(), "T".into())],
+            fallback_oneline: String::new(),
+        });
+        let mut app = App::new_with_initial_doc(
+            "fixture.md".into(),
+            doc,
+            10,
+            40,
+            Config::default(),
+            Theme::Dark,
+        );
+        let active = app.active_mut();
+        active.viewport.ensure_wrap(&active.doc, true, false);
+
+        let placements = desired_image_placements(&app);
+        assert_eq!(placements.get(&1), Some(&(0, 2)));
+        assert_eq!(placements.get(&2), Some(&(0, 5)));
     }
 }
 
