@@ -41,8 +41,7 @@ pub fn map_normal(key: KeyEvent) -> Action {
 
         // Note: the bare-char arms below intentionally match regardless of
         // modifiers, so `Ctrl-d/u/f/b` hit the same actions as `d/u/f/b`.
-        // This matches the design-doc key table and is exercised by
-        // `ctrl_modifier_variants_match_bare_letter`.
+        // This is exercised by `ctrl_modifier_variants_match_bare_letter`.
         KeyCode::Char('d') => Action::ScrollHalfPage(1),
         KeyCode::Char('u') => Action::ScrollHalfPage(-1),
 
@@ -50,7 +49,7 @@ pub fn map_normal(key: KeyEvent) -> Action {
         KeyCode::Char('b') | KeyCode::PageUp => Action::ScrollPage(-1),
 
         KeyCode::Char('G') => Action::JumpEnd,
-        // Note: `g` alone is not a JumpStart — Task 4.1 adds the `gg` two-key sequence.
+        // `g` alone is handled by the event loop as the first key of `gg`.
         KeyCode::Char(']') => Action::NextHeading,
         KeyCode::Char('[') => Action::PrevHeading,
 
@@ -198,8 +197,8 @@ mod tests {
 
     #[test]
     fn ctrl_modifier_variants_match_bare_letter() {
-        // Design doc promises Ctrl-d/u/f/b as aliases. The match expression
-        // on key.code (without modifier guards) gives us this for free, but
+        // The match expression on key.code (without modifier guards) makes
+        // Ctrl-d/u/f/b aliases of their bare letters, but
         // a regression test makes the contract explicit so a future refactor
         // that adds `if !ctrl` guards won't silently break vim muscle memory.
         assert!(matches!(

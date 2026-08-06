@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-在终端中以大字体标题渲染 Markdown，让观感更接近 GUI Markdown 阅读器的体验，基于 Kitty 图形协议。
+termdown 基于 Kitty 图形协议，在终端中以大字体标题渲染 Markdown，提供更接近 GUI Markdown 阅读器的阅读体验。
 
 <table>
 <tr>
@@ -11,23 +11,18 @@
 </tr>
 </table>
 
-## 为什么做这个
-
-本项目受 [glow](https://github.com/charmbracelet/glow) 和 [mdfried](https://github.com/benjajaja/mdfried) 启发。
-
-- **glow** 不支持放大标题字体
-- **mdfried** 支持放大 markdown 标题，但个人感觉可以做的更美观一点
+## 功能
 
 termdown 将 H1-H3 标题栅格化为 PNG 图片，通过 Kitty 图形协议直接绘制到终端。提供两种使用模式：
 
-- **交互式 TUI**（默认）—— `termdown README.md`，类 vim/less 的体验，支持常见的翻页、搜索等快捷键，支持查看 TOC、链接跳转，适合阅读较长文档。
-- **直接输出**（`--cat`，或当 stdout 被管道/重定向、输入来自 stdin 时自动启用）—— 像 `cat` 一样轻量、管道友好，把渲染后的 Markdown 直接打到终端。
+- **交互式 TUI**（默认）—— `termdown README.md`，提供类似 vim/less 的体验，支持翻页、搜索、查看目录和链接跳转，适合阅读较长文档。
+- **直接输出** —— `termdown --cat README.md`，像 `cat` 一样直接输出渲染后的 Markdown，适合查看短文档或通过管道交给其他程序处理。
 
-H4-H6 标题始终以 ANSI 粗体文本渲染。不想让文档加入那么多种字重，那样反而损害可读性。
+H4-H6 标题始终以 ANSI 粗体文本渲染，不再模拟更多字号和字重，以免损害终端中的可读性。
 
 ## 安装
 
-### 从 crates.io（推荐，需要 Rust）
+### Cargo
 
 ```sh
 cargo install termdown
@@ -35,13 +30,13 @@ cargo install termdown
 
 安装到 `~/.cargo/bin/`。需要 Rust 1.95+。
 
-### 安装脚本（无需 Rust 工具链）
+### 脚本安装
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
-默认装到 `/usr/local/bin`。用 `TERMDOWN_INSTALL_DIR` 覆盖安装目录。
+默认装到 `/usr/local/bin`。可以用 `TERMDOWN_INSTALL_DIR` 覆盖安装目录。
 
 <details>
 <summary>手动下载</summary>
@@ -60,7 +55,7 @@ sudo mv termdown /usr/local/bin/
 
 </details>
 
-### 从源码
+### 源码安装
 
 ```sh
 cargo install --git https://github.com/rrbe/termdown
@@ -100,18 +95,20 @@ termdown --help
 termdown --watch notes.md
 ```
 
-完整的命令行参数、TUI 快捷键、配置项和已知问题都在 **[使用指南](docs/USAGE_CN.md)**。配置是可选的，位于 `~/.config/termdown/config.toml` —— 全部默认值见 [`config.example.toml`](config.example.toml)。
+## 文档
+
+- [使用指南](docs/USAGE_CN.md)
+- [项目概览](docs/OVERVIEW.md)
+- 配置和默认值：[`config.example.toml`](config.example.toml)
+- 配置文件：`~/.config/termdown/config.toml`
 
 ## 终端支持
 
-需要支持 **Kitty 图形协议** 的终端（目前仅在 Ghostty 和 iTerm2 上测试过）：
+需要支持 **Kitty 图形协议** 的终端，比如：
 
-- [Ghostty](https://ghostty.org)
 - [Kitty](https://sw.kovidgoyal.net/kitty/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
 - [iTerm2](https://iterm2.com)
-
-不支持的终端会打印警告。H4-H6 标题始终以 ANSI 粗体文本渲染。
+- [Ghostty](https://ghostty.org)
 
 ## 许可证
 

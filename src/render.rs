@@ -497,7 +497,7 @@ pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
 
 // ─── Shared Image Record ────────────────────────────────────────────────────
 
-/// PNG data + cell dimensions for a rendered heading image.
+/// PNG data + vertical dimensions for a rendered heading image.
 /// Stored by id in `RenderedDoc` and transmitted to the terminal
 /// once per TUI session (or emitted directly in cat mode).
 ///
@@ -506,15 +506,11 @@ pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
 /// refined by `tui::mod::refine_image_rows` once the real terminal cell
 /// pixel height is known. `px_height` preserves the exact PNG height so
 /// the refinement step can compute `ceil(px_height / cell_pixel_height)`.
-// TODO: remove #[allow(dead_code)] once Task 1.5 wires up image production
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadingImage {
     pub id: u32,
     pub png: Vec<u8>,
-    pub cols: u16,
     pub rows: u16,
-    pub px_width: u32,
     pub px_height: u32,
 }
 

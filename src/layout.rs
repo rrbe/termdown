@@ -618,7 +618,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     // Walk in document order so image IDs are deterministic across runs.
     let mut next_image_id: u32 = 1;
     for (p, result) in pending_headings.into_iter().zip(results) {
-        if let Some((png, px_width, px_height)) = result {
+        if let Some((png, _, px_height)) = result {
             let id = next_image_id;
             next_image_id += 1;
             // Conservative upper bound; TUI refines once it knows cell pixel height.
@@ -630,9 +630,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             images.push(HeadingImage {
                 id,
                 png,
-                cols: 0,
                 rows,
-                px_width,
                 px_height,
             });
             let line = &mut lines[p.line_index];
