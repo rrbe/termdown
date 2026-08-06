@@ -30,6 +30,7 @@ use viewport::Viewport;
 const TOC_PANEL_WIDTH: u16 = 30;
 const KITTY_PREFIX_TIMEOUT: Duration = Duration::from_millis(50);
 const KITTY_PAYLOAD_TIMEOUT: Duration = Duration::from_millis(250);
+const FOCUS_IMAGE_REFRESH_DELAY: Duration = Duration::from_millis(250);
 
 enum Mode {
     Normal,
@@ -559,7 +560,13 @@ fn event_loop<B: Backend>(
     app: &mut App,
     mut live_watch: Option<LiveWatch>,
 ) -> io::Result<()> {
+    let mut focus_refresh_at = None;
     loop {
+        if focus_refresh_at.is_some_and(|deadline| Instant::now() >= deadline) {
+            app.needs_full_redraw = true;
+            focus_refresh_at = None;
+        }
+
         // Live reload: drain any pending file-change notifications, coalescing
         // the burst of events a single save produces into one reload. Checked
         // every iteration (not just when a key arrives) so a save with no
@@ -637,10 +644,17 @@ fn event_loop<B: Backend>(
             {
                 continue;
             }
-            // A resize invalidates layout; regaining focus may mean the
-            // terminal rebuilt its graphics layer while the screen was locked.
-            if requires_full_redraw(&ev) {
+            if matches!(ev, Event::Resize(_, _)) {
                 app.needs_full_redraw = true;
+                continue;
+            }
+            if let Some(delay) = focus_refresh_delay(&ev) {
+                // Some terminals can discard a redraw while restoring their graphics layer.
+                focus_refresh_at = Some(Instant::now() + delay);
+                continue;
+            }
+            if matches!(ev, Event::FocusLost) {
+                focus_refresh_at = None;
                 continue;
             }
             let cursor_before = app.cursor;
@@ -671,8 +685,8 @@ fn event_loop<B: Backend>(
     }
 }
 
-fn requires_full_redraw(ev: &Event) -> bool {
-    matches!(ev, Event::Resize(_, _) | Event::FocusGained)
+fn focus_refresh_delay(ev: &Event) -> Option<Duration> {
+    matches!(ev, Event::FocusGained).then_some(FOCUS_IMAGE_REFRESH_DELAY)
 }
 
 #[cfg(test)]
@@ -680,9 +694,13 @@ mod redraw_event_tests {
     use super::*;
 
     #[test]
-    fn focus_gain_requires_full_redraw() {
-        assert!(requires_full_redraw(&Event::FocusGained));
-        assert!(!requires_full_redraw(&Event::FocusLost));
+    fn focus_gain_delays_image_refresh_until_the_tab_settles() {
+        assert_eq!(
+            focus_refresh_delay(&Event::FocusGained),
+            Some(FOCUS_IMAGE_REFRESH_DELAY)
+        );
+        assert_eq!(focus_refresh_delay(&Event::FocusLost), None);
+        assert_eq!(focus_refresh_delay(&Event::Resize(80, 24)), None);
     }
 }
 
