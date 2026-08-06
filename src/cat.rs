@@ -3,6 +3,8 @@
 
 use std::io::{BufWriter, Write};
 
+use crossterm::tty::IsTty;
+
 use crate::config::Config;
 use crate::frontmatter::{self, MetadataInfo};
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
@@ -14,6 +16,7 @@ use crate::style::{
 
 pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Config) {
     let stdout = std::io::stdout();
+    let display_images = stdout.is_tty();
     let mut out = BufWriter::new(stdout.lock());
 
     if config.metadata.unwrap_or(true) {
@@ -40,7 +43,20 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
             continue;
         }
 
-        write_line(&mut out, line, &doc.images, term_width, colors);
+        let heading_text = doc
+            .headings
+            .iter()
+            .find(|heading| heading.line_index == i)
+            .map(|heading| heading.text.as_str());
+        write_line(
+            &mut out,
+            line,
+            &doc.images,
+            heading_text,
+            display_images,
+            term_width,
+            colors,
+        );
         i += 1;
     }
     let _ = out.flush();
@@ -50,6 +66,8 @@ fn write_line<W: Write>(
     out: &mut W,
     line: &Line,
     images: &[crate::render::HeadingImage],
+    heading_text: Option<&str>,
+    display_images: bool,
     term_width: usize,
     colors: &Colors,
 ) {
@@ -62,13 +80,17 @@ fn write_line<W: Write>(
             let _ = writeln!(out, "{DIM_ON}{}{RESET}", "\u{2500}".repeat(width));
         }
         LineKind::Heading { id, .. } => {
-            if let Some(image_id) = id {
-                if let Some(img) = images.iter().find(|i| i.id == *image_id) {
-                    let _ = writeln!(out, "{}", render::kitty_display(&img.png));
-                    return;
+            if display_images {
+                if let Some(image_id) = id {
+                    if let Some(img) = images.iter().find(|i| i.id == *image_id) {
+                        let _ = writeln!(out, "{}", render::kitty_display(&img.png));
+                        return;
+                    }
                 }
             }
-            let text = render_spans_plain(&line.spans);
+            let text = heading_text
+                .map(str::to_owned)
+                .unwrap_or_else(|| render_spans_plain(&line.spans));
             let _ = writeln!(out, "{BOLD_ON}{text}{RESET}");
         }
         LineKind::BlockQuote { depth } => {

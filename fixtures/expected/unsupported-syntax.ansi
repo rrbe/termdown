@@ -1,4 +1,4 @@
-<IMG>
+[1mUnsupported Syntax Showcase[0m
 
 This fixture collects Markdown features termdown does [1mnot[0m plan to support, or
 treats as out-of-scope. It exists to lock the current "graceful degradation"
@@ -8,13 +8,13 @@ one of these, the snapshot will diff.
 Features that are on the [1mroadmap[0m (HTML tags, images, markdown frontmatter,
 long-text wrap & indent) live in [38;5;213m[48;5;236m supported-syntax.md [0m, not here.
 
-<IMG>
+[1m1. GFM autolinks (bare URLs)[0m
 
 Bare URL: https://example.com/docs/readme.html
 Bare email: support@example.com
 URL in text: visit https://github.com/rrbe/termdown for the source.
 
-<IMG>
+[1m2. GFM alerts / admonitions[0m
 
 [38;5;240m│  [3;38;5;250m[!NOTE][0m
 [38;5;240m│  [3;38;5;250mUseful information that users should know, even when skimming content.[0m
@@ -31,7 +31,7 @@ URL in text: visit https://github.com/rrbe/termdown for the source.
 [38;5;240m│  [3;38;5;250m[!CAUTION][0m
 [38;5;240m│  [3;38;5;250mAdvises about risks or negative outcomes of certain actions.[0m
 
-<IMG>
+[1m3. Footnotes[0m
 
 Here is a sentence with a footnote.[^1] And another one.[^longnote]
 
@@ -44,7 +44,7 @@ body.]
 [48;5;236m[38;5;213m paragraphs. It should render as a numbered reference in the main text, [0m
 [48;5;236m[38;5;213m with the body collected at the bottom of the document.                 [0m
 
-<IMG>
+[1m4. Math (LaTeX)[0m
 
 Inline math: the Pythagorean theorem says $a^2 + b^2 = c^2$.
 
@@ -60,7 +60,7 @@ $$
 A = \begin{pmatrix} 1 & 2 \ 3 & 4 \end{pmatrix}
 $$
 
-<IMG>
+[1m5. Definition list[0m
 
 Term 1
 : Definition of term 1.
@@ -76,21 +76,21 @@ Apple
 Orange
 : A citrus fruit with a tough rind.
 
-<IMG>
+[1m6. Smart punctuation[0m
 
 Straight quotes that should become curly: "Hello," she said. 'Yes,' he replied.
 Ellipsis from three dots... and an em-dash -- like this, and an en-dash -- too.
 
-<IMG>
+[1m7. Wikilinks[0m
 
 Reference a page with [[WikiLink]] syntax, and with an alias like
 [[Target Page|the display text]].
 
-<IMG>
+[1m8. Subscript and superscript[0m
 
 Water is H~2~O and Einstein said E=mc^2^. Also 10^th^ and x~n+1~.
 
-<IMG>
+[1m9. Mermaid diagrams[0m
 
 A flowchart:
 
@@ -119,7 +119,7 @@ A class diagram:
 [48;5;236m[38;5;213m     Animal <|-- Dog       [0m
 [48;5;236m[38;5;213m     Animal <|-- Cat       [0m
 
-<IMG>
+[1m10. PlantUML / Graphviz[0m
 
 [48;5;236m[38;5;213m @startuml                              [0m
 [48;5;236m[38;5;213m Alice -> Bob: Authentication Request   [0m
@@ -132,7 +132,7 @@ A class diagram:
 [48;5;236m[38;5;213m     A -> C;      [0m
 [48;5;236m[38;5;213m }                [0m
 
-<IMG>
+[1m11. Code block syntax highlighting[0m
 
 Fenced blocks with a language tag are recognized but the contents are not
 syntax-highlighted today — only the structure is preserved.
@@ -149,12 +149,12 @@ syntax-highlighted today — only the structure is preserved.
 [48;5;236m[38;5;213m   "version": "0.2.0"                               [0m
 [48;5;236m[38;5;213m }                                                  [0m
 
-<IMG>
+[1m12. Emoji shortcodes[0m
 
 Shortcodes like :smile:, :rocket:, :tada: should ideally become 😄 🚀 🎉.
 Unicode emoji themselves work fine: 😄 🚀 🎉.
 
-<IMG>
+[1mEnd[0m
 
 If every section above renders with at least [3msome[23m graceful fallback,
 termdown is degrading correctly on out-of-scope syntax.

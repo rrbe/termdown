@@ -499,7 +499,7 @@ pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
 
 /// PNG data + vertical dimensions for a rendered heading image.
 /// Stored by id in `RenderedDoc` and transmitted to the terminal
-/// once per TUI session (or emitted directly in cat mode).
+/// once per TUI session (or emitted directly when cat mode writes to a TTY).
 ///
 /// `rows` is the number of terminal cell rows the image occupies. This is
 /// a conservative estimate at layout time (based on heading level) and is
@@ -543,6 +543,13 @@ mod kitty_tests {
         );
         // Middle chunks use m=1, final uses m=0.
         assert!(s.contains(";") && s.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn display_transmits_and_displays() {
+        let s = kitty_display(b"\x89PNG\r\n");
+        assert!(s.starts_with("\x1b_Gf=100,a=T,q=2"));
+        assert!(s.ends_with("\x1b\\"));
     }
 
     #[test]
@@ -600,6 +607,35 @@ mod heading_cache_tests {
         let _light = render_heading(text, 1, &cfg, Theme::Light).expect("heading should render");
         let map = HEADING_CACHE.get().unwrap().lock().unwrap();
         assert!(map.contains_key(&(1u8, Theme::Light, fp, text.to_owned())));
+    }
+
+    #[test]
+    fn rendered_heading_pngs_are_valid_nonblank_and_scale_by_level() {
+        let cfg = Config::default();
+        let titles = [
+            "🚀 H1 标题 with emoji 中文",
+            "✨ H2 标题 with emoji 中文",
+            "🧪 H3 标题 with emoji 中文",
+        ];
+        let images: Vec<_> = titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                let (png, _, _) = render_heading(title, index as u8 + 1, &cfg, Theme::Dark)
+                    .expect("heading should render");
+                image::load_from_memory_with_format(&png, ImageFormat::Png)
+                    .expect("heading should be a valid PNG")
+                    .to_rgba8()
+            })
+            .collect();
+
+        assert!(images[0].height() > images[1].height());
+        assert!(images[1].height() > images[2].height());
+        for image in images {
+            assert!(image.width() > 100);
+            let nonblank = image.pixels().filter(|pixel| pixel[3] > 0).count();
+            assert!(nonblank * 20 >= (image.width() * image.height()) as usize);
+        }
     }
 
     #[test]
