@@ -649,7 +649,7 @@ fn event_loop<B: Backend>(
                 continue;
             }
             if let Some(delay) = focus_refresh_delay(&ev) {
-                // iTerm2 can discard a redraw while its tab is still activating.
+                // Some terminals can discard a redraw while restoring their graphics layer.
                 focus_refresh_at = Some(Instant::now() + delay);
                 continue;
             }
