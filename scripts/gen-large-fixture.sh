@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gen-large-fixture.sh — produce fixtures/specialized/large.md, a stress/perf
 # fixture for termdown. The output is gitignored and never committed: generate
-# it on demand, perf-test, then delete it (see docs/TESTING.md). Output is
+# it on demand, perf-test, then delete it. Output is
 # deterministic (no $RANDOM, no timestamps), so a clean re-run is byte-identical.
 #
 # Usage:

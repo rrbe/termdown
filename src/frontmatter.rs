@@ -2,8 +2,7 @@
 //!
 //! We never feed the block to a real YAML/TOML parser. The block's destination
 //! is a single dim summary line (cat / TUI folded) or an inline expanded box
-//! (TUI), so fidelity beyond "key = value" doesn't matter. See
-//! `docs/adr/0001-metadata-block-handling.md`.
+//! (TUI), so fidelity beyond "key = value" doesn't matter.
 
 use pulldown_cmark::MetadataBlockKind;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};

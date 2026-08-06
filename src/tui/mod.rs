@@ -1183,7 +1183,7 @@ fn clipped_spans(
     let mut out: Vec<RSpan<'static>> = Vec::new();
     let mut cursor = 0usize;
 
-    // Highlight styles. Task 8/theme follow-up: pull from style::Colors instead.
+    // Search highlight styles are intentionally distinct from document colors.
     let current_style = RStyle::default().bg(RColor::Yellow).fg(RColor::Black);
     let other_style = RStyle::default()
         .bg(RColor::Rgb(80, 80, 0))
@@ -1871,17 +1871,13 @@ mod renumber_tests {
                 crate::render::HeadingImage {
                     id: 1,
                     png: vec![],
-                    cols: 0,
                     rows: 3,
-                    px_width: 1,
                     px_height: 1,
                 },
                 crate::render::HeadingImage {
                     id: 2,
                     png: vec![],
-                    cols: 0,
                     rows: 3,
-                    px_width: 1,
                     px_height: 1,
                 },
             ],

@@ -2,7 +2,7 @@
 
 [中文文档](README_CN.md)
 
-Render Markdown with large-font headings in the terminal using the Kitty graphics protocol.
+termdown uses the Kitty graphics protocol to render Markdown with large-font headings in the terminal, providing a reading experience closer to a GUI Markdown reader.
 
 <table>
 <tr>
@@ -11,22 +11,18 @@ Render Markdown with large-font headings in the terminal using the Kitty graphic
 </tr>
 </table>
 
-## Motivation
+## Features
 
-Inspired by [glow](https://github.com/charmbracelet/glow) and [mdfried](https://github.com/benjajaja/mdfried).
+termdown rasterizes H1-H3 headings as PNG images and draws them directly in the terminal through the Kitty graphics protocol. It provides two modes:
 
-glow is a great terminal Markdown renderer, but headings are only distinguished by ANSI bold/color -- they can't actually be displayed at a larger size. mdfried supports image-rendered headings, but requires entering a TUI.
+- **Interactive TUI** (default) -- `termdown README.md` provides a vim/less-like experience with paging, search, a table of contents, and link navigation for longer documents.
+- **Direct output** -- `termdown --cat README.md` prints rendered Markdown like `cat`, making it suitable for short documents or piping to other programs.
 
-termdown rasterizes H1-H3 headings as PNG and paints them via the Kitty graphics protocol. Two modes share the same renderer:
-
-- **Interactive TUI** (default when a file is given) -- vim-style browser with search, Table of Contents, and link-follow navigation for longer documents.
-- **Direct output** (`--cat`, or automatic when stdout is piped / input comes from stdin) -- dump rendered Markdown straight into your terminal.
-
-H4-H6 headings always fall back to ANSI bold text.
+H4-H6 headings always use ANSI bold text instead of simulating more font sizes and weights that could reduce readability in a terminal.
 
 ## Installation
 
-### From crates.io (recommended, requires Rust)
+### Cargo
 
 ```sh
 cargo install termdown
@@ -34,14 +30,7 @@ cargo install termdown
 
 Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 
-> **Linux:** no `-dev` packages or `pkg-config` are required to build — only a
-> C toolchain (freetype is compiled from source when the system one isn't
-> found), and fontconfig is loaded lazily at run time. For system font
-> discovery (including CJK headings), install `fontconfig` plus the fonts you
-> want (e.g. `apt install fontconfig fonts-noto-cjk`). Without it, termdown
-> falls back to its bundled font.
-
-### Prebuilt binary (no Rust toolchain needed)
+### Install script
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
@@ -50,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | b
 Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTALL_DIR`.
 
 <details>
-<summary>Manual download (no script)</summary>
+<summary>Manual download</summary>
 
 ```sh
 TARGET=aarch64-apple-darwin
@@ -66,7 +55,7 @@ sudo mv termdown /usr/local/bin/
 
 </details>
 
-### From git (latest development snapshot)
+### Install from source
 
 ```sh
 cargo install --git https://github.com/rrbe/termdown
@@ -106,18 +95,20 @@ termdown --help
 termdown --watch notes.md
 ```
 
-The full CLI reference, TUI key bindings, configuration, and known issues live in the **[Usage Guide](docs/USAGE.md)**. Configuration is optional and lives at `~/.config/termdown/config.toml` -- see [`config.example.toml`](config.example.toml) for every default.
+## Documentation
+
+- [Usage guide](docs/USAGE.md)
+- [Project overview](docs/OVERVIEW.md)
+- Configuration and defaults: [`config.example.toml`](config.example.toml)
+- Configuration file: `~/.config/termdown/config.toml`
 
 ## Terminal Support
 
-Requires a terminal with **Kitty graphics protocol** support:
+Requires a terminal with **Kitty graphics protocol** support, such as:
 
-- [Ghostty](https://ghostty.org)
 - [Kitty](https://sw.kovidgoyal.net/kitty/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
 - [iTerm2](https://iterm2.com)
-
-On unsupported terminals, termdown prints a warning and heading images may not display correctly. H4-H6 headings always render as plain ANSI bold text.
+- [Ghostty](https://ghostty.org)
 
 ## License
 

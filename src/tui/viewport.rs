@@ -1,7 +1,6 @@
 //! Scroll state + wrap cache for the TUI body.
 //!
-//! v1 wrap is a no-op (one visual line per logical line). Task 4.4 replaces
-//! `wrap_all` with a width-aware breaker.
+//! Logical lines are split into width-aware visual lines for display.
 
 use crate::layout::{Line, RenderedDoc, Span};
 
@@ -24,7 +23,7 @@ pub struct VisualLine {
     pub is_spacer: bool,
     /// Set on rows that visualize the document's frontmatter metadata block.
     /// `logical_index` is [`NO_LOGICAL`] for these rows — `draw()` consults
-    /// `doc.metadata` instead. See `docs/adr/0001-metadata-block-handling.md`.
+    /// `doc.metadata` instead.
     pub metadata_row: Option<MetadataVisualRow>,
 }
 
