@@ -16,7 +16,7 @@ termdown 基于 Kitty 图形协议，在终端中以大字体标题渲染 Markdo
 termdown 将 H1-H3 标题栅格化为 PNG 图片，通过 Kitty 图形协议直接绘制到终端。提供两种使用模式：
 
 - **交互式 TUI**（默认）—— `termdown README.md`，提供类似 vim/less 的体验，支持翻页、搜索、查看目录和链接跳转，适合阅读较长文档。
-- **直接输出** —— `termdown --cat README.md`，像 `cat` 一样直接输出渲染后的 Markdown，适合查看短文档或通过管道交给其他程序处理。
+- **直接输出** —— `termdown --cat README.md`，像 `cat` 一样直接输出渲染后的 Markdown，适合查看短文档；通过管道或重定向输出时，标题使用文本而不是 Kitty 图片。
 
 H4-H6 标题始终以 ANSI 粗体文本渲染，不再模拟更多字号和字重，以免损害终端中的可读性。
 

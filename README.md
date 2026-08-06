@@ -16,7 +16,7 @@ termdown uses the Kitty graphics protocol to render Markdown with large-font hea
 termdown rasterizes H1-H3 headings as PNG images and draws them directly in the terminal through the Kitty graphics protocol. It provides two modes:
 
 - **Interactive TUI** (default) -- `termdown README.md` provides a vim/less-like experience with paging, search, a table of contents, and link navigation for longer documents.
-- **Direct output** -- `termdown --cat README.md` prints rendered Markdown like `cat`, making it suitable for short documents or piping to other programs.
+- **Direct output** -- `termdown --cat README.md` prints rendered Markdown like `cat`, making it suitable for short documents. Piped or redirected output uses text headings instead of Kitty images.
 
 H4-H6 headings always use ANSI bold text instead of simulating more font sizes and weights that could reduce readability in a terminal.
 
