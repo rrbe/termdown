@@ -87,6 +87,9 @@ termdown README.md
 termdown --cat README.md
 cat notes.md | termdown
 
+# Editor integration: Markdown stdin -> deterministic ANSI stdout
+cat notes.md | termdown --render --width 80 --theme dark
+
 # Pick a theme; show help
 termdown --theme light README.md
 termdown --help

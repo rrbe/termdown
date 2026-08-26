@@ -87,6 +87,9 @@ termdown README.md
 termdown --cat README.md
 cat notes.md | termdown
 
+# 编辑器集成：Markdown stdin -> 确定性的 ANSI stdout
+cat notes.md | termdown --render --width 80 --theme dark
+
 # 指定主题；查看帮助
 termdown --theme light README.md
 termdown --help

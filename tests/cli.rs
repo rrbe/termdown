@@ -211,6 +211,70 @@ fn stdin_rendering_works_without_terminal_warning_when_supported() {
 }
 
 #[test]
+fn editor_render_reads_stdin_and_forces_ansi_without_kitty_images() {
+    let input = "# Hello\n\nThis is **bold**.\n\n| A | B |\n| - | - |\n| 1 | 2 |\n";
+    let output = run_termdown(
+        &["--render", "--width", "40", "--theme", "dark"],
+        Some(input),
+        &[],
+        &["TERM_PROGRAM", "TERM", "KITTY_WINDOW_ID"],
+    );
+    let raw = stdout_text(&output);
+    let clean = strip_ansi(&raw);
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+    assert!(stderr_text(&output).trim().is_empty());
+    assert!(raw.contains("\x1b[1m"), "raw output: {raw:?}");
+    assert!(!raw.contains("\x1b_G"), "raw output: {raw:?}");
+    assert!(clean.contains("Hello"));
+    assert!(clean.contains("This is bold."));
+    assert!(clean.contains("A  │  B"));
+}
+
+#[test]
+fn editor_render_honors_width() {
+    let output = run_termdown(
+        &["--render", "--width", "7", "--theme", "dark"],
+        Some("one two three four\n"),
+        &[],
+        &[],
+    );
+
+    assert!(output.status.success(), "stderr: {}", stderr_text(&output));
+    assert_eq!(strip_ansi(&stdout_text(&output)), "one\ntwo\nthree\nfour\n");
+}
+
+#[test]
+fn editor_render_rejects_missing_invalid_and_conflicting_arguments() {
+    for (args, expected) in [
+        (
+            vec!["--render", "--theme", "dark"],
+            "--render requires --width <columns>",
+        ),
+        (
+            vec!["--render", "--width", "0", "--theme", "dark"],
+            "invalid --width value",
+        ),
+        (
+            vec!["--render", "--width", "80", "--cat", "--theme", "dark"],
+            "--render cannot be used with --cat",
+        ),
+        (
+            vec!["--render", "--width", "80", "file.md", "--theme", "dark"],
+            "does not accept FILE",
+        ),
+    ] {
+        let output = run_termdown(&args, Some("hello\n"), &[], &[]);
+        assert_eq!(output.status.code(), Some(2), "args: {args:?}");
+        assert!(
+            stderr_text(&output).contains(expected),
+            "args: {args:?}; stderr: {}",
+            stderr_text(&output)
+        );
+    }
+}
+
+#[test]
 fn file_input_renders_table_output() {
     let file = TempMarkdownFile::new("| A | B |\n| - | - |\n| x | long |\n");
     let output = run_termdown(

@@ -94,7 +94,34 @@ struct ListState {
     counter: u64,
 }
 
+/// Controls optional work performed while building a rendered document.
+///
+/// Interactive callers keep heading images enabled. Stream-oriented callers
+/// such as editor integrations can disable them to avoid font lookup and PNG
+/// rasterization when only ANSI text will be displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildOptions {
+    pub heading_images: bool,
+}
+
+impl Default for BuildOptions {
+    fn default() -> Self {
+        Self {
+            heading_images: true,
+        }
+    }
+}
+
 pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
+    build_with_options(md, config, theme, BuildOptions::default())
+}
+
+pub fn build_with_options(
+    md: &str,
+    config: &Config,
+    theme: Theme,
+    build_options: BuildOptions,
+) -> RenderedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -187,7 +214,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                         id: None,
                     },
                 });
-                if heading_level <= 3 {
+                if build_options.heading_images && heading_level <= 3 {
                     pending_headings.push(Pending {
                         level: heading_level,
                         text,
@@ -1049,6 +1076,30 @@ mod tests {
 
         let entry = doc.headings.iter().find(|h| h.level == 1);
         assert!(matches!(entry, Some(e) if e.text == "Title"));
+    }
+
+    #[test]
+    fn build_can_skip_heading_image_rasterization() {
+        let config = Config::default();
+        let doc = build_with_options(
+            "# Title\n\nbody\n",
+            &config,
+            Theme::Dark,
+            BuildOptions {
+                heading_images: false,
+            },
+        );
+
+        assert!(doc.images.is_empty());
+        let heading = doc
+            .lines
+            .iter()
+            .find(|line| matches!(line.kind, LineKind::Heading { level: 1, .. }))
+            .expect("H1 line should exist");
+        assert!(matches!(
+            heading.spans.as_slice(),
+            [Span::Text { content, style }] if content == "Title" && style.bold
+        ));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Stream a `RenderedDoc` to stdout as ANSI text. Wrapping, quote prefixes,
 //! list indentation, and Kitty heading image emission all happen here.
 
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 
 use crossterm::tty::IsTty;
 
@@ -19,10 +19,27 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
     let display_images = stdout.is_tty();
     let mut out = BufWriter::new(stdout.lock());
 
+    let _ = write_ansi(&mut out, doc, term_width, colors, config, display_images);
+    let _ = out.flush();
+}
+
+/// Write a rendered document as ANSI text.
+///
+/// The caller chooses whether Kitty heading images may be emitted, which lets
+/// editor integrations force a deterministic text-only stream independent of
+/// whether their stdout happens to be attached to a terminal.
+pub fn write_ansi<W: Write>(
+    out: &mut W,
+    doc: &RenderedDoc,
+    term_width: usize,
+    colors: &Colors,
+    config: &Config,
+    display_images: bool,
+) -> io::Result<()> {
     if config.metadata.unwrap_or(true) {
         if let Some(meta) = &doc.metadata {
-            write_metadata_oneline(&mut out, meta, term_width);
-            let _ = writeln!(&mut out);
+            write_metadata_oneline(out, meta, term_width)?;
+            writeln!(out)?;
         }
     }
 
@@ -38,7 +55,7 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
             {
                 end += 1;
             }
-            emit_code_block(&mut out, &doc.lines[i..end], colors);
+            emit_code_block(out, &doc.lines[i..end], colors)?;
             i = end;
             continue;
         }
@@ -49,17 +66,17 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
             .find(|heading| heading.line_index == i)
             .map(|heading| heading.text.as_str());
         write_line(
-            &mut out,
+            out,
             line,
             &doc.images,
             heading_text,
             display_images,
             term_width,
             colors,
-        );
+        )?;
         i += 1;
     }
-    let _ = out.flush();
+    Ok(())
 }
 
 fn write_line<W: Write>(
@@ -70,77 +87,82 @@ fn write_line<W: Write>(
     display_images: bool,
     term_width: usize,
     colors: &Colors,
-) {
+) -> io::Result<()> {
     match &line.kind {
         LineKind::Blank => {
-            let _ = writeln!(out);
+            writeln!(out)?;
         }
         LineKind::HorizontalRule => {
             let width = term_width.min(62).saturating_sub(2);
-            let _ = writeln!(out, "{DIM_ON}{}{RESET}", "\u{2500}".repeat(width));
+            writeln!(out, "{DIM_ON}{}{RESET}", "\u{2500}".repeat(width))?;
         }
         LineKind::Heading { id, .. } => {
             if display_images {
                 if let Some(image_id) = id {
                     if let Some(img) = images.iter().find(|i| i.id == *image_id) {
-                        let _ = writeln!(out, "{}", render::kitty_display(&img.png));
-                        return;
+                        return writeln!(out, "{}", render::kitty_display(&img.png));
                     }
                 }
             }
             let text = heading_text
                 .map(str::to_owned)
                 .unwrap_or_else(|| render_spans_plain(&line.spans));
-            let _ = writeln!(out, "{BOLD_ON}{text}{RESET}");
+            writeln!(out, "{BOLD_ON}{text}{RESET}")?;
         }
         LineKind::BlockQuote { depth } => {
-            write_paragraph(out, &line.spans, *depth as usize, term_width, colors);
+            write_paragraph(out, &line.spans, *depth as usize, term_width, colors)?;
         }
         LineKind::Body => {
-            write_paragraph(out, &line.spans, 0, term_width, colors);
+            write_paragraph(out, &line.spans, 0, term_width, colors)?;
         }
         LineKind::ListItem { .. } => {
             // Layout has already baked the indent and bullet/number marker
             // into the first text span.
             let body = render_spans_ansi(&line.spans, colors);
-            wrap_and_write(out, &body, term_width);
+            wrap_and_write(out, &body, term_width)?;
         }
         LineKind::CodeBlock { .. } => {
             // Single-line code blocks are handled via emit_code_block; this
             // branch is unreachable in practice because `print` batches them.
             let text = render_spans_plain(&line.spans);
-            let _ = writeln!(out, "{}{} {text} {RESET}", colors.code_bg, colors.code_fg);
+            writeln!(out, "{}{} {text} {RESET}", colors.code_bg, colors.code_fg)?;
         }
         LineKind::Table => {
             let rendered = render_spans_ansi(&line.spans, colors);
-            let _ = writeln!(out, "{rendered}");
+            writeln!(out, "{rendered}")?;
         }
     }
+    Ok(())
 }
 
 /// Render the folded one-line metadata summary used by both cat and the TUI's
 /// collapsed state: `[metadata · k=v, k=v, …]`, dimmed, truncated to fit
 /// while preserving the closing `]`.
-pub fn write_metadata_oneline<W: Write>(out: &mut W, meta: &MetadataInfo, term_width: usize) {
+pub fn write_metadata_oneline<W: Write>(
+    out: &mut W,
+    meta: &MetadataInfo,
+    term_width: usize,
+) -> io::Result<()> {
     let text = frontmatter::folded_summary(meta, term_width);
-    let _ = writeln!(out, "{DIM_ON}{text}{RESET}");
+    writeln!(out, "{DIM_ON}{text}{RESET}")
 }
 
 /// Emit a consecutive run of `LineKind::CodeBlock` lines, padding each to the
 /// longest line in the group so the background renders as a clean rectangle.
-fn emit_code_block<W: Write>(out: &mut W, group: &[Line], colors: &Colors) {
+fn emit_code_block<W: Write>(out: &mut W, group: &[Line], colors: &Colors) -> io::Result<()> {
     let texts: Vec<String> = group.iter().map(|l| render_spans_plain(&l.spans)).collect();
     let max_w = texts.iter().map(|t| display_width(t)).max().unwrap_or(0);
     for text in &texts {
         let pad = max_w.saturating_sub(display_width(text));
-        let _ = writeln!(
+        writeln!(
             out,
             "{}{} {text}{} {RESET}",
             colors.code_bg,
             colors.code_fg,
             " ".repeat(pad)
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn write_paragraph<W: Write>(
@@ -149,7 +171,7 @@ fn write_paragraph<W: Write>(
     quote_depth: usize,
     term_width: usize,
     colors: &Colors,
-) {
+) -> io::Result<()> {
     let body = render_spans_ansi(spans, colors);
     let prefix = if quote_depth > 0 {
         let bars: String = (0..quote_depth)
@@ -163,22 +185,23 @@ fn write_paragraph<W: Write>(
     let max_text_width = term_width.saturating_sub(quote_depth * 3);
 
     if max_text_width == 0 || display_width(&body) <= max_text_width {
-        let _ = writeln!(out, "{prefix}{body}{suffix}");
+        writeln!(out, "{prefix}{body}{suffix}")?;
     } else {
         for wrapped in wrap_text(&body, max_text_width) {
-            let _ = writeln!(out, "{prefix}{wrapped}{suffix}");
+            writeln!(out, "{prefix}{wrapped}{suffix}")?;
         }
     }
+    Ok(())
 }
 
-fn wrap_and_write<W: Write>(out: &mut W, text: &str, term_width: usize) {
+fn wrap_and_write<W: Write>(out: &mut W, text: &str, term_width: usize) -> io::Result<()> {
     if display_width(text) <= term_width {
-        let _ = writeln!(out, "{text}");
-        return;
+        return writeln!(out, "{text}");
     }
     for wrapped in wrap_text(text, term_width) {
-        let _ = writeln!(out, "{wrapped}");
+        writeln!(out, "{wrapped}")?;
     }
+    Ok(())
 }
 
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
@@ -348,7 +371,7 @@ mod tests {
 
         // width=8, quote_depth=1 → prefix width = 1*3 = 3, max_text_width =
         // 8 - 3 = 5. Each word ("alpha"/"beta"/"gamma") is on its own line.
-        write_paragraph(&mut out, &spans, 1, 8, &colors);
+        write_paragraph(&mut out, &spans, 1, 8, &colors).unwrap();
 
         let got = String::from_utf8(out).unwrap();
         let prefix = format!("{}\u{2502}  {}", colors.quote_bar, colors.quote_text);
