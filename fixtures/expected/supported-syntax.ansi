@@ -292,6 +292,35 @@ line.
 
 [38;5;240m│  [3;38;5;250m引用块里也放几个字符：💡 🛠 📦[0m
 
+[1m13. Mermaid diagrams[0m
+
+A flowchart:
+
+[48;5;236m[38;5;213m flowchart LR                 [0m
+[48;5;236m[38;5;213m     A[Start] --> B{Decision} [0m
+[48;5;236m[38;5;213m     B -->|Yes| C[Do thing]   [0m
+[48;5;236m[38;5;213m     B -->|No| D[Skip]        [0m
+[48;5;236m[38;5;213m     C --> E[End]             [0m
+[48;5;236m[38;5;213m     D --> E                  [0m
+
+A sequence diagram:
+
+[48;5;236m[38;5;213m sequenceDiagram                [0m
+[48;5;236m[38;5;213m     Alice->>Bob: Hello Bob     [0m
+[48;5;236m[38;5;213m     Bob-->>Alice: Hi Alice     [0m
+[48;5;236m[38;5;213m     Alice-)Bob: See you later! [0m
+
+A class diagram:
+
+[48;5;236m[38;5;213m classDiagram              [0m
+[48;5;236m[38;5;213m     class Animal {        [0m
+[48;5;236m[38;5;213m         +String name      [0m
+[48;5;236m[38;5;213m         +int age          [0m
+[48;5;236m[38;5;213m         +makeSound() void [0m
+[48;5;236m[38;5;213m     }                     [0m
+[48;5;236m[38;5;213m     Animal <|-- Dog       [0m
+[48;5;236m[38;5;213m     Animal <|-- Cat       [0m
+
 [1mEnd[0m
 
 如果以上每一节都能正确（或按当前能力部分正确）渲染，termdown

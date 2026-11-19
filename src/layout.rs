@@ -3,14 +3,14 @@ use rayon::prelude::*;
 
 use crate::config::Config;
 use crate::frontmatter::{self, MetadataInfo};
-use crate::render::HeadingImage;
+use crate::render::DocumentImage;
 use crate::theme::Theme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedDoc {
     pub lines: Vec<Line>,
     pub headings: Vec<HeadingEntry>,
-    pub images: Vec<HeadingImage>,
+    pub images: Vec<DocumentImage>,
     /// Parsed frontmatter, if the document opens with a YAML (`---`) or TOML
     /// (`+++`) metadata block. The block content never appears in `lines`
     /// regardless of [`config.metadata`]; renderers consult this field
@@ -33,6 +33,12 @@ pub enum LineKind {
     },
     CodeBlock {
         lang: Option<String>,
+    },
+    Mermaid {
+        id: u32,
+        width: u32,
+        height: u32,
+        labels: String,
     },
     BlockQuote {
         depth: u8,
@@ -94,7 +100,7 @@ struct ListState {
     counter: u64,
 }
 
-pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
+pub fn build(md: &str, config: &Config, theme: Theme, render_mermaid: bool) -> RenderedDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -113,7 +119,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut pending_link_url: Option<String> = None;
     let mut heading_level: u8 = 0;
     let mut heading_text = String::new();
-    let mut images: Vec<HeadingImage> = Vec::new();
+    let mut images: Vec<DocumentImage> = Vec::new();
     let mut headings: Vec<HeadingEntry> = Vec::new();
     // Deferred so all H1-H3 rasterizations can run in parallel after the parse.
     struct Pending {
@@ -125,6 +131,7 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
     let mut quote_depth: u8 = 0;
     let mut list_stack: Vec<ListState> = Vec::new();
     let mut in_code_block: Option<Option<String>> = None;
+    let mut mermaid_source: Option<String> = None;
     let mut table_rows: Vec<Vec<Vec<Span>>> = Vec::new();
     let mut current_row: Vec<Vec<Span>> = Vec::new();
     let mut in_table_header = false;
@@ -283,16 +290,10 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
             Event::Text(t) => {
                 if heading_level > 0 {
                     heading_text.push_str(&t);
-                } else if let Some(lang) = in_code_block.clone() {
-                    for line in t.lines() {
-                        lines.push(Line {
-                            spans: vec![Span::Text {
-                                content: line.to_string(),
-                                style: Style::default(),
-                            }],
-                            kind: LineKind::CodeBlock { lang: lang.clone() },
-                        });
-                    }
+                } else if let Some(source) = &mut mermaid_source {
+                    source.push_str(&t);
+                } else if let Some(lang) = &in_code_block {
+                    push_code_lines(&mut lines, &t, lang);
                 } else {
                     text_buf.push_str(&t);
                 }
@@ -379,10 +380,36 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
                     }
                     _ => None,
                 };
+                if render_mermaid
+                    && lang.as_deref().and_then(|s| s.split_whitespace().next()) == Some("mermaid")
+                {
+                    mermaid_source = Some(String::new());
+                }
                 in_code_block = Some(lang);
             }
             Event::End(TagEnd::CodeBlock) => {
-                in_code_block = None;
+                let lang = in_code_block.take().flatten();
+                if let Some(source) = mermaid_source.take() {
+                    if let Some(diagram) = crate::mermaid::render(&source, theme) {
+                        let id = images.len() as u32 + 1;
+                        images.push(DocumentImage {
+                            id,
+                            png: diagram.png,
+                            px_height: diagram.height,
+                        });
+                        lines.push(Line {
+                            spans: Vec::new(),
+                            kind: LineKind::Mermaid {
+                                id,
+                                width: diagram.width,
+                                height: diagram.height,
+                                labels: diagram.labels,
+                            },
+                        });
+                    } else {
+                        push_code_lines(&mut lines, &source, &lang);
+                    }
+                }
             }
 
             Event::Rule => {
@@ -615,24 +642,17 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
         .map(|p| crate::render::render_heading(&p.text, p.level, config, theme))
         .collect();
 
-    // Walk in document order so image IDs are deterministic across runs.
-    let mut next_image_id: u32 = 1;
+    // Assign heading IDs in document order after the diagrams.
     for (p, result) in pending_headings.into_iter().zip(results) {
         if let Some((png, _, px_height)) = result {
-            let id = next_image_id;
-            next_image_id += 1;
+            let id = images.len() as u32 + 1;
             // Conservative upper bound; TUI refines once it knows cell pixel height.
             let rows = match p.level {
                 1 => 6,
                 2 => 4,
                 _ => 3,
             };
-            images.push(HeadingImage {
-                id,
-                png,
-                rows,
-                px_height,
-            });
+            images.push(DocumentImage { id, png, px_height });
             let line = &mut lines[p.line_index];
             line.spans = vec![Span::HeadingImage { id, rows }];
             line.kind = LineKind::Heading {
@@ -648,6 +668,16 @@ pub fn build(md: &str, config: &Config, theme: Theme) -> RenderedDoc {
         images,
         metadata,
     }
+}
+
+fn push_code_lines(lines: &mut Vec<Line>, source: &str, lang: &Option<String>) {
+    lines.extend(source.lines().map(|line| Line {
+        spans: vec![Span::Text {
+            content: line.to_string(),
+            style: Style::default(),
+        }],
+        kind: LineKind::CodeBlock { lang: lang.clone() },
+    }));
 }
 
 // ─── Inline HTML helpers ────────────────────────────────────────────────────
@@ -929,7 +959,7 @@ mod tests {
 
     fn build_plain(md: &str) -> RenderedDoc {
         let cfg = Config::default();
-        super::build(md, &cfg, Theme::Dark)
+        super::build(md, &cfg, Theme::Dark, false)
     }
 
     #[test]
@@ -938,6 +968,42 @@ mod tests {
         assert!(doc.lines.iter().any(
             |l| matches!(l.kind, LineKind::Body) && spans_plain_text(&l.spans) == "hello world"
         ));
+    }
+
+    #[test]
+    fn renders_each_mermaid_block_and_keeps_invalid_source() {
+        let doc = super::build(
+            "## Diagrams\n\n```mermaid\nflowchart LR\nA[Ready & set] --> B[Done]\n```\n\n\
+             ```mermaid\nsequenceDiagram\nAlice->>Bob: Hello\n```\n\n\
+             ```mermaid\nthis is invalid\n```\n\nAfter the diagrams.\n",
+            &Config::default(),
+            Theme::Dark,
+            true,
+        );
+        let diagrams: Vec<_> = doc
+            .lines
+            .iter()
+            .filter_map(|line| match line.kind {
+                LineKind::Mermaid {
+                    id, width, height, ..
+                } => Some((id, width, height)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(diagrams.len(), 2);
+        for (id, width, height) in diagrams {
+            let image = doc.images.iter().find(|image| image.id == id).unwrap();
+            assert!(image.png.starts_with(b"\x89PNG\r\n\x1a\n"));
+            assert!(width > 0 && height > 0);
+        }
+        assert!(doc.lines.iter().any(|line| {
+            matches!(&line.kind, LineKind::CodeBlock { lang: Some(lang) } if lang == "mermaid")
+                && spans_plain_text(&line.spans) == "this is invalid"
+        }));
+        assert_eq!(
+            spans_plain_text(&doc.lines.last().unwrap().spans),
+            "After the diagrams."
+        );
     }
 
     fn spans_plain_text(spans: &[Span]) -> String {
