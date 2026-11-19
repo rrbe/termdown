@@ -38,6 +38,7 @@ pub enum LineKind {
         id: u32,
         width: u32,
         height: u32,
+        labels: String,
     },
     BlockQuote {
         depth: u8,
@@ -389,16 +390,21 @@ pub fn build(md: &str, config: &Config, theme: Theme, render_mermaid: bool) -> R
             Event::End(TagEnd::CodeBlock) => {
                 let lang = in_code_block.take().flatten();
                 if let Some(source) = mermaid_source.take() {
-                    if let Some((png, width, height)) = crate::mermaid::render(&source, theme) {
+                    if let Some(diagram) = crate::mermaid::render(&source, theme) {
                         let id = images.len() as u32 + 1;
                         images.push(DocumentImage {
                             id,
-                            png,
-                            px_height: height,
+                            png: diagram.png,
+                            px_height: diagram.height,
                         });
                         lines.push(Line {
                             spans: Vec::new(),
-                            kind: LineKind::Mermaid { id, width, height },
+                            kind: LineKind::Mermaid {
+                                id,
+                                width: diagram.width,
+                                height: diagram.height,
+                                labels: diagram.labels,
+                            },
                         });
                     } else {
                         push_code_lines(&mut lines, &source, &lang);
@@ -967,8 +973,8 @@ mod tests {
     #[test]
     fn renders_each_mermaid_block_and_keeps_invalid_source() {
         let doc = super::build(
-            "## Diagrams\n\n```mermaid\nflowchart LR\nA[开始] --> B[结束]\n```\n\n\
-             ```mermaid\nsequenceDiagram\nAlice->>Bob: 你好\n```\n\n\
+            "## Diagrams\n\n```mermaid\nflowchart LR\nA[Ready & set] --> B[Done]\n```\n\n\
+             ```mermaid\nsequenceDiagram\nAlice->>Bob: Hello\n```\n\n\
              ```mermaid\nthis is invalid\n```\n\nAfter the diagrams.\n",
             &Config::default(),
             Theme::Dark,
@@ -978,7 +984,9 @@ mod tests {
             .lines
             .iter()
             .filter_map(|line| match line.kind {
-                LineKind::Mermaid { id, width, height } => Some((id, width, height)),
+                LineKind::Mermaid {
+                    id, width, height, ..
+                } => Some((id, width, height)),
                 _ => None,
             })
             .collect();

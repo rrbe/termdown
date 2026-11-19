@@ -177,6 +177,16 @@ fn supports_kitty_graphics() -> bool {
         .to_lowercase();
     let term = std::env::var("TERM").unwrap_or_default().to_lowercase();
 
+    // Multiplexer panes can inherit terminal markers from the outer session.
+    if term_program == "tmux"
+        || term.starts_with("tmux")
+        || term.starts_with("screen")
+        || std::env::var_os("TMUX").is_some()
+        || std::env::var_os("STY").is_some()
+    {
+        return false;
+    }
+
     term_program == "ghostty"
         || term_program == "kitty"
         || term_program == "wezterm"

@@ -122,6 +122,39 @@ impl Viewport {
         self.top = new_top.min(max_top);
     }
 
+    /// Keep a diagram fully visible on at least one page as we scroll past it.
+    pub fn scroll_page(&mut self, doc: &RenderedDoc, delta: i32) {
+        let before = self.top;
+        self.scroll_by(delta);
+        let edge = if delta > 0 {
+            self.visible().first()
+        } else {
+            self.visible().last()
+        };
+        let Some(edge) = edge else {
+            return;
+        };
+        let logical = edge.logical_index;
+        let Some(Line {
+            kind: LineKind::Mermaid { width, height, .. },
+            ..
+        }) = doc.lines.get(logical)
+        else {
+            return;
+        };
+        let start = self
+            .visual_line_for_logical(logical)
+            .expect("diagram at viewport edge has a visual row");
+        let rows = usize::from(self.diagram_size(*width, *height).rows);
+        let earliest_top = (start + rows).saturating_sub(usize::from(self.height));
+
+        if delta > 0 && before < earliest_top && self.top > start {
+            self.top = start;
+        } else if delta < 0 && before > start && self.top < earliest_top {
+            self.top = earliest_top;
+        }
+    }
+
     pub fn visible(&self) -> &[VisualLine] {
         let end = (self.top + self.height as usize).min(self.visual_lines.len());
         &self.visual_lines[self.top..end]

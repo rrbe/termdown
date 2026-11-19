@@ -714,13 +714,18 @@ mod redraw_event_tests {
 /// Detection lives here (not in `Viewport`) so the data layer stays free of
 /// `App`/`Config`/audio coupling and `gg`/`G`/`]`/`[` — which bypass this
 /// helper — silently stay non-belling, matching the chosen scope.
-fn perform_scroll(app: &mut App, delta: i32) {
+fn perform_scroll(app: &mut App, delta: i32, page: bool) {
     if delta == 0 {
         return;
     }
-    let before = app.active().viewport.top;
-    app.active_mut().viewport.scroll_by(delta);
-    if app.active().viewport.top == before {
+    let active = app.active_mut();
+    let before = active.viewport.top;
+    if page {
+        active.viewport.scroll_page(&active.doc, delta);
+    } else {
+        active.viewport.scroll_by(delta);
+    }
+    if active.viewport.top == before {
         ring_bell(&app.config);
     }
 }
@@ -762,14 +767,14 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             input::Action::Quit => {
                 app.should_quit = true;
             }
-            input::Action::ScrollLines(d) => perform_scroll(app, d),
+            input::Action::ScrollLines(d) => perform_scroll(app, d, false),
             input::Action::ScrollHalfPage(s) => {
                 let delta = (app.active().viewport.height as i32 / 2) * s;
-                perform_scroll(app, delta);
+                perform_scroll(app, delta, true);
             }
             input::Action::ScrollPage(s) => {
                 let delta = app.active().viewport.height as i32 * s;
-                perform_scroll(app, delta);
+                perform_scroll(app, delta, true);
             }
             input::Action::JumpStart => app.active_mut().viewport.top = 0,
             input::Action::JumpEnd => {
@@ -1038,7 +1043,7 @@ fn apply_search_jump(app: &mut App, reverse: bool) {
     };
     state.current = Some(idx);
     let line = state.matches[idx].line_index;
-    center_on_logical(&mut active.viewport, line);
+    center_on_logical(&mut active.viewport, &active.doc, line);
 }
 
 fn advance_search(app: &mut App, delta: i32) {
@@ -1054,13 +1059,17 @@ fn advance_search(app: &mut App, delta: i32) {
     let next = ((cur + delta) % len + len) % len;
     state.current = Some(next as usize);
     let line = state.matches[next as usize].line_index;
-    center_on_logical(&mut active.viewport, line);
+    center_on_logical(&mut active.viewport, &active.doc, line);
 }
 
-fn center_on_logical(vp: &mut Viewport, logical: usize) {
+fn center_on_logical(vp: &mut Viewport, doc: &layout::RenderedDoc, logical: usize) {
     if let Some(vi) = vp.visual_line_for_logical(logical) {
-        let third = (vp.height as usize) / 3;
-        let new_top = vi.saturating_sub(third);
+        let mut offset = vp.height / 3;
+        if let layout::LineKind::Mermaid { width, height, .. } = doc.lines[logical].kind {
+            let rows = vp.diagram_size(width, height).rows;
+            offset = offset.min(vp.height.saturating_sub(rows));
+        }
+        let new_top = vi.saturating_sub(usize::from(offset));
         let max_top = vp.total_visual_lines().saturating_sub(vp.height as usize);
         vp.top = new_top.min(max_top);
     }
@@ -1792,7 +1801,9 @@ fn desired_image_placements(app: &App) -> HashMap<u32, kitty::Placement> {
         let logical = &active.doc.lines[vl.logical_index];
         let vr = visual_row as u16;
         let image = match logical.kind {
-            layout::LineKind::Mermaid { id, width, height } => {
+            layout::LineKind::Mermaid {
+                id, width, height, ..
+            } => {
                 let size = active.viewport.diagram_size(width, height);
                 Some((id, size.rows, Some(size)))
             }
@@ -1982,15 +1993,15 @@ mod renumber_tests {
         );
     }
 
-    #[test]
-    fn diagram_placement_fits_body_and_updates_after_resize() {
-        let doc = RenderedDoc {
+    fn diagram_doc() -> RenderedDoc {
+        RenderedDoc {
             lines: vec![Line {
                 spans: vec![],
                 kind: LineKind::Mermaid {
                     id: 1,
                     width: 800,
                     height: 640,
+                    labels: "Diagram label".into(),
                 },
             }],
             headings: vec![],
@@ -2000,10 +2011,14 @@ mod renumber_tests {
                 px_height: 640,
             }],
             metadata: None,
-        };
+        }
+    }
+
+    #[test]
+    fn diagram_placement_fits_body_and_updates_after_resize() {
         let mut app = App::new_with_initial_doc(
             "diagram.md".into(),
-            doc,
+            diagram_doc(),
             20,
             80,
             Config::default(),
@@ -2024,6 +2039,40 @@ mod renumber_tests {
                     size: Some(crate::render::CellSize { cols, rows: height }),
                 }
             );
+        }
+    }
+
+    #[test]
+    fn paging_stops_on_a_full_height_diagram_in_both_directions() {
+        let mut doc = diagram_doc();
+        let diagram = doc.lines.pop().unwrap();
+        let body = Line {
+            spans: vec![],
+            kind: LineKind::Blank,
+        };
+        doc.lines.extend(std::iter::repeat_n(body.clone(), 7));
+        doc.lines.push(diagram);
+        doc.lines.extend(std::iter::repeat_n(body, 15));
+        let mut app = App::new_with_initial_doc(
+            "diagram.md".into(),
+            doc,
+            15,
+            80,
+            Config::default(),
+            Theme::Dark,
+        );
+        let active = app.active_mut();
+        active.viewport.ensure_wrap(&active.doc, false, false);
+
+        for (key, top, has_diagram) in [
+            (event::KeyCode::Char(' '), 7, true),
+            (event::KeyCode::Char(' '), 22, false),
+            (event::KeyCode::PageUp, 7, true),
+            (event::KeyCode::PageUp, 0, false),
+        ] {
+            handle_normal_key(&mut app, &Event::Key(event::KeyEvent::from(key))).unwrap();
+            assert_eq!(app.active().viewport.top, top);
+            assert_eq!(desired_image_placements(&app).contains_key(&1), has_diagram);
         }
     }
 }

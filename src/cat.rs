@@ -94,7 +94,9 @@ fn write_line<W: Write>(
                 .unwrap_or_else(|| render_spans_plain(&line.spans));
             let _ = writeln!(out, "{BOLD_ON}{text}{RESET}");
         }
-        LineKind::Mermaid { id, width, height } => {
+        LineKind::Mermaid {
+            id, width, height, ..
+        } => {
             if let Some(img) = images.iter().find(|img| img.id == *id) {
                 let area = CellSize {
                     cols: screen.cols,
