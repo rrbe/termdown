@@ -13,6 +13,8 @@ termdown [选项] [文件]
 |---|---|
 | `文件` | 要渲染的 Markdown 文件。用 `-` 或省略则从 stdin 读取（始终是 cat 模式）。 |
 | `--cat` | 强制使用非交互的 cat 风格输出（管道友好）。 |
+| `--render` | 从 stdin 读取 Markdown，为编辑器集成强制输出纯文本 ANSI；必须同时传入 `--width`。 |
+| `--width <列数>` | `--render` 使用的正整数输出宽度。 |
 | `--theme <auto\|dark\|light>` | 配色主题。默认 `auto`，通过 OSC 11 检测终端背景色。 |
 | `--no-bell` | 关闭到顶/到底的终端提示铃（也可在配置中设 `bell = false`）。 |
 | `-w`, `--watch` | 监听文件变动并在保存时实时刷新预览（也可在配置中设 `watch = true`）。仅 TUI 模式生效。 |
@@ -34,6 +36,9 @@ termdown --cat README.md
 
 # 从 stdin 管道输入（始终是 cat 模式 —— TUI 需要真实文件）
 cat notes.md | termdown
+
+# 按明确宽度渲染编辑器中的未保存内容（不生成 Kitty 图片）
+cat notes.md | termdown --render --width 80 --theme dark
 
 # stdout 被管道/重定向时也会自动回退到 cat
 termdown README.md | less

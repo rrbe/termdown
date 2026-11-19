@@ -13,6 +13,8 @@ termdown [OPTIONS] [FILE]
 |---|---|
 | `FILE` | Markdown file to render. Use `-` or omit to read from stdin (always cat mode). |
 | `--cat` | Force non-interactive cat-style output (pipe-friendly). |
+| `--render` | Read Markdown from stdin and force text-only ANSI output for editor integrations. Requires `--width`. |
+| `--width <columns>` | Positive output width for `--render`. |
 | `--theme <auto\|dark\|light>` | Color theme. Default `auto` detects the terminal background via OSC 11. |
 | `--no-bell` | Disable the edge-scroll terminal bell (also `bell = false` in config). |
 | `-w`, `--watch` | Watch the file and live-reload the TUI on save (also `watch = true` in config). TUI only. |
@@ -35,6 +37,9 @@ termdown --cat README.md
 
 # Pipe from stdin (always cat-style — TUI needs a real file)
 cat notes.md | termdown
+
+# Render unsaved editor content at an explicit width (no Kitty images)
+cat notes.md | termdown --render --width 80 --theme dark
 
 # Piped or redirected stdout also falls back to cat
 termdown README.md | less
