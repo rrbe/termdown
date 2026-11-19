@@ -26,6 +26,11 @@ fn run_termdown(
     command.env_remove("USERPROFILE");
     command.env_remove("XDG_CONFIG_HOME");
 
+    // Terminal capabilities are set by each test, independently of the runner.
+    for key in ["TERM", "TERM_PROGRAM", "KITTY_WINDOW_ID", "TMUX", "STY"] {
+        command.env_remove(key);
+    }
+
     if stdin.is_some() {
         command.stdin(Stdio::piped());
     }
@@ -212,7 +217,8 @@ fn stdin_rendering_works_without_terminal_warning_when_supported() {
 
 #[test]
 fn editor_render_reads_stdin_and_forces_ansi_without_kitty_images() {
-    let input = "# Hello\n\nThis is **bold**.\n\n| A | B |\n| - | - |\n| 1 | 2 |\n";
+    let input = "# Hello\n\nThis is **bold**.\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n\
+                 ```mermaid\nflowchart LR\nA[Start] --> B[End]\n```\n";
     let output = run_termdown(
         &["--render", "--width", "40", "--theme", "dark"],
         Some(input),
@@ -229,6 +235,7 @@ fn editor_render_reads_stdin_and_forces_ansi_without_kitty_images() {
     assert!(clean.contains("Hello"));
     assert!(clean.contains("This is bold."));
     assert!(clean.contains("A  │  B"));
+    assert!(clean.contains("A[Start] --> B[End]"));
 }
 
 #[test]
@@ -272,6 +279,38 @@ fn editor_render_rejects_missing_invalid_and_conflicting_arguments() {
             stderr_text(&output)
         );
     }
+}
+
+#[test]
+fn tmux_overrides_inherited_kitty_markers() {
+    let output = run_termdown(
+        &["-"],
+        Some("hello\n"),
+        &[
+            ("TERM", "tmux-256color"),
+            ("TERM_PROGRAM", "kitty"),
+            ("KITTY_WINDOW_ID", "1"),
+        ],
+        &[],
+    );
+    assert!(output.status.success());
+    assert!(stderr_text(&output).contains("terminal may not support Kitty graphics protocol"));
+}
+
+#[test]
+fn piped_mermaid_output_keeps_source() {
+    let output = run_termdown(
+        &["--theme", "dark", "-"],
+        Some("```mermaid\nflowchart LR\nA[开始] --> B[结束]\n```\n"),
+        &[("TERM_PROGRAM", "ghostty")],
+        &[],
+    );
+    assert!(output.status.success());
+    let stdout = stdout_text(&output);
+    assert!(!stdout.contains("\x1b_G"));
+    let stdout = strip_ansi(&stdout);
+    assert!(stdout.contains("flowchart LR"));
+    assert!(stdout.contains("A[开始] --> B[结束]"));
 }
 
 #[test]

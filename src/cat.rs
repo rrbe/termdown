@@ -1,5 +1,5 @@
 //! Stream a `RenderedDoc` to stdout as ANSI text. Wrapping, quote prefixes,
-//! list indentation, and Kitty heading image emission all happen here.
+//! list indentation, and Kitty image emission all happen here.
 
 use std::io::{self, BufWriter, Write};
 
@@ -8,24 +8,31 @@ use crossterm::tty::IsTty;
 use crate::config::Config;
 use crate::frontmatter::{self, MetadataInfo};
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
-use crate::render;
+use crate::render::{self, CellPixels, CellSize, DocumentImage};
 use crate::style::{
     display_width, Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, RESET, STRIKETHROUGH_OFF,
     STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
 };
 
-pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Config) {
+pub fn print(doc: &RenderedDoc, screen: CellSize, colors: &Colors, config: &Config) {
     let stdout = std::io::stdout();
-    let display_images = stdout.is_tty();
+    let image_area = stdout.is_tty().then_some(screen);
     let mut out = BufWriter::new(stdout.lock());
 
-    let _ = write_ansi(&mut out, doc, term_width, colors, config, display_images);
+    let _ = write_ansi(
+        &mut out,
+        doc,
+        usize::from(screen.cols),
+        colors,
+        config,
+        image_area,
+    );
     let _ = out.flush();
 }
 
 /// Write a rendered document as ANSI text.
 ///
-/// The caller chooses whether Kitty heading images may be emitted, which lets
+/// The caller chooses whether Kitty images may be emitted, which lets
 /// editor integrations force a deterministic text-only stream independent of
 /// whether their stdout happens to be attached to a terminal.
 pub fn write_ansi<W: Write>(
@@ -34,7 +41,7 @@ pub fn write_ansi<W: Write>(
     term_width: usize,
     colors: &Colors,
     config: &Config,
-    display_images: bool,
+    image_area: Option<CellSize>,
 ) -> io::Result<()> {
     if config.metadata.unwrap_or(true) {
         if let Some(meta) = &doc.metadata {
@@ -70,7 +77,7 @@ pub fn write_ansi<W: Write>(
             line,
             &doc.images,
             heading_text,
-            display_images,
+            image_area,
             term_width,
             colors,
         )?;
@@ -82,9 +89,9 @@ pub fn write_ansi<W: Write>(
 fn write_line<W: Write>(
     out: &mut W,
     line: &Line,
-    images: &[crate::render::HeadingImage],
+    images: &[DocumentImage],
     heading_text: Option<&str>,
-    display_images: bool,
+    image_area: Option<CellSize>,
     term_width: usize,
     colors: &Colors,
 ) -> io::Result<()> {
@@ -97,10 +104,10 @@ fn write_line<W: Write>(
             writeln!(out, "{DIM_ON}{}{RESET}", "\u{2500}".repeat(width))?;
         }
         LineKind::Heading { id, .. } => {
-            if display_images {
+            if image_area.is_some() {
                 if let Some(image_id) = id {
                     if let Some(img) = images.iter().find(|i| i.id == *image_id) {
-                        return writeln!(out, "{}", render::kitty_display(&img.png));
+                        return writeln!(out, "{}", render::kitty_display(&img.png, None));
                     }
                 }
             }
@@ -108,6 +115,23 @@ fn write_line<W: Write>(
                 .map(str::to_owned)
                 .unwrap_or_else(|| render_spans_plain(&line.spans));
             writeln!(out, "{BOLD_ON}{text}{RESET}")?;
+        }
+        LineKind::Mermaid {
+            id, width, height, ..
+        } => {
+            let Some(screen) = image_area else {
+                return Ok(());
+            };
+            if let Some(img) = images.iter().find(|img| img.id == *id) {
+                let area = CellSize {
+                    cols: screen.cols,
+                    rows: screen.rows.saturating_sub(1),
+                };
+                let fit = CellPixels::query()
+                    .unwrap_or_default()
+                    .fit(*width, *height, area);
+                writeln!(out, "{}", render::kitty_display(&img.png, fit.scale))?;
+            }
         }
         LineKind::BlockQuote { depth } => {
             write_paragraph(out, &line.spans, *depth as usize, term_width, colors)?;

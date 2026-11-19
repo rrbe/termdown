@@ -89,42 +89,7 @@ Reference a page with [[WikiLink]] syntax, and with an alias like
 
 Water is H~2~O and Einstein said E=mc^2^. Also 10^th^ and x~n+1~.
 
-## 9. Mermaid diagrams
-
-A flowchart:
-
-```mermaid
-flowchart LR
-    A[Start] --> B{Decision}
-    B -->|Yes| C[Do thing]
-    B -->|No| D[Skip]
-    C --> E[End]
-    D --> E
-```
-
-A sequence diagram:
-
-```mermaid
-sequenceDiagram
-    Alice->>Bob: Hello Bob
-    Bob-->>Alice: Hi Alice
-    Alice-)Bob: See you later!
-```
-
-A class diagram:
-
-```mermaid
-classDiagram
-    class Animal {
-        +String name
-        +int age
-        +makeSound() void
-    }
-    Animal <|-- Dog
-    Animal <|-- Cat
-```
-
-## 10. PlantUML / Graphviz
+## 9. PlantUML / Graphviz
 
 ```plantuml
 @startuml
@@ -141,7 +106,7 @@ digraph G {
 }
 ```
 
-## 11. Code block syntax highlighting
+## 10. Code block syntax highlighting
 
 Fenced blocks with a language tag are recognized but the contents are not
 syntax-highlighted today — only the structure is preserved.
@@ -162,7 +127,7 @@ def fib(n: int) -> int:
 }
 ```
 
-## 12. Emoji shortcodes
+## 11. Emoji shortcodes
 
 Shortcodes like :smile:, :rocket:, :tada: should ideally become 😄 🚀 🎉.
 Unicode emoji themselves work fine: 😄 🚀 🎉.

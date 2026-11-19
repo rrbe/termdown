@@ -20,6 +20,8 @@ termdown rasterizes H1-H3 headings as PNG images and draws them directly in the 
 
 H4-H6 headings always use ANSI bold text instead of simulating more font sizes and weights that could reduce readability in a terminal.
 
+Fenced `mermaid` blocks, including flowcharts and sequence diagrams, render as diagrams in the TUI and in `--cat` on supported terminals. Diagrams follow the selected theme and scale to fit the available space. Pipes, redirects, and blocks that cannot be rendered show the Mermaid source.
+
 ## Installation
 
 ### Cargo

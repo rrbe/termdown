@@ -287,6 +287,41 @@ Body text mixes 中文、English、ASCII punctuation, and emoji 🌍 within the 
 
 > 引用块里也放几个字符：💡 🛠 📦
 
+## 13. Mermaid diagrams
+
+A flowchart:
+
+```mermaid
+flowchart LR
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Do thing]
+    B -->|No| D[Skip]
+    C --> E[End]
+    D --> E
+```
+
+A sequence diagram:
+
+```mermaid
+sequenceDiagram
+    Alice->>Bob: Hello Bob
+    Bob-->>Alice: Hi Alice
+    Alice-)Bob: See you later!
+```
+
+A class diagram:
+
+```mermaid
+classDiagram
+    class Animal {
+        +String name
+        +int age
+        +makeSound() void
+    }
+    Animal <|-- Dog
+    Animal <|-- Cat
+```
+
 ## End
 
 如果以上每一节都能正确（或按当前能力部分正确）渲染，termdown 的核心语法覆盖就达标了。

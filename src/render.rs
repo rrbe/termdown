@@ -399,7 +399,7 @@ pub fn drain_iterm2_acks() {
 }
 
 /// Encode PNG data as a Kitty graphics protocol escape sequence.
-pub fn kitty_display(png: &[u8]) -> String {
+pub fn kitty_display(png: &[u8], scale: Option<ImageScale>) -> String {
     use base64::engine::general_purpose::STANDARD;
     let b64 = STANDARD.encode(png);
     let mut out = String::new();
@@ -413,7 +413,8 @@ pub fn kitty_display(png: &[u8]) -> String {
         let m = if end == total { "0" } else { "1" };
         if first {
             first = false;
-            out.push_str(&format!("\x1b_Gf=100,a=T,q=2,m={m};{chunk}\x1b\\"));
+            let size = placement_size(scale);
+            out.push_str(&format!("\x1b_Gf=100,a=T,q=2,m={m}{size};{chunk}\x1b\\"));
         } else {
             out.push_str(&format!("\x1b_Gm={m};{chunk}\x1b\\"));
         }
@@ -473,14 +474,29 @@ pub fn transmit<W: Write>(w: &mut W, id: u32, png: &[u8]) -> std::io::Result<()>
 /// push the cursor past the last row, causing the terminal to scroll the
 /// entire visible region upward — this snowballs across frames and
 /// produces the "status bar creeps upward on each scroll" failure.
-pub fn place<W: Write>(w: &mut W, id: u32, col: u16, row: u16) -> std::io::Result<()> {
+pub fn place<W: Write>(
+    w: &mut W,
+    id: u32,
+    col: u16,
+    row: u16,
+    scale: Option<ImageScale>,
+) -> std::io::Result<()> {
     // CUP (cursor position) is 1-indexed: row+1, col+1.
+    let size = placement_size(scale);
     write!(
         w,
-        "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},C=1,q=2;\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},C=1,q=2{size};\x1b\\",
         row + 1,
         col + 1
     )
+}
+
+fn placement_size(scale: Option<ImageScale>) -> String {
+    match scale {
+        Some(ImageScale::Columns(cols)) => format!(",c={cols}"),
+        Some(ImageScale::Rows(rows)) => format!(",r={rows}"),
+        None => String::new(),
+    }
 }
 
 /// Delete a single placement of `id`. Keeps the cached image data so future
@@ -497,21 +513,78 @@ pub fn delete_all_for_client<W: Write>(w: &mut W) -> std::io::Result<()> {
 
 // ─── Shared Image Record ────────────────────────────────────────────────────
 
-/// PNG data + vertical dimensions for a rendered heading image.
+/// PNG data and pixel height for a document image.
 /// Stored by id in `RenderedDoc` and transmitted to the terminal
 /// once per TUI session (or emitted directly when cat mode writes to a TTY).
-///
-/// `rows` is the number of terminal cell rows the image occupies. This is
-/// a conservative estimate at layout time (based on heading level) and is
-/// refined by `tui::mod::refine_image_rows` once the real terminal cell
-/// pixel height is known. `px_height` preserves the exact PNG height so
-/// the refinement step can compute `ceil(px_height / cell_pixel_height)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeadingImage {
+pub struct DocumentImage {
     pub id: u32,
     pub png: Vec<u8>,
-    pub rows: u16,
     pub px_height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageScale {
+    Columns(u16),
+    Rows(u16),
+}
+
+pub struct ImageFit {
+    pub rows: u16,
+    pub scale: Option<ImageScale>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellPixels {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Default for CellPixels {
+    fn default() -> Self {
+        Self {
+            width: 8,
+            height: 16,
+        }
+    }
+}
+
+impl CellPixels {
+    pub fn query() -> Option<Self> {
+        let ws = crossterm::terminal::window_size().ok()?;
+        let width = u32::from(ws.width).checked_div(u32::from(ws.columns))?;
+        let height = u32::from(ws.height).checked_div(u32::from(ws.rows))?;
+        (width > 0 && height > 0).then_some(Self { width, height })
+    }
+
+    /// Decide how many rows to reserve and which axis, if any, limits the image.
+    pub fn fit(self, width: u32, height: u32, area: CellSize) -> ImageFit {
+        let natural_cols = f64::from(width) / f64::from(self.width);
+        let natural_rows = f64::from(height) / f64::from(self.height);
+        let cols = area.cols.max(1);
+        let rows = area.rows.max(1);
+        let horizontal_scale = f64::from(cols) / natural_cols;
+        let vertical_scale = f64::from(rows) / natural_rows;
+        // Some terminals stretch to the exact cell rectangle when both axes
+        // are given. Send only the limiting axis to preserve the aspect ratio.
+        let (factor, scale) = if horizontal_scale < 1.0 && horizontal_scale <= vertical_scale {
+            (horizontal_scale, Some(ImageScale::Columns(cols)))
+        } else if vertical_scale < 1.0 {
+            (vertical_scale, Some(ImageScale::Rows(rows)))
+        } else {
+            (1.0, None)
+        };
+        ImageFit {
+            rows: ((natural_rows * factor).ceil() as u16).clamp(1, rows),
+            scale,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -547,15 +620,32 @@ mod kitty_tests {
 
     #[test]
     fn display_transmits_and_displays() {
-        let s = kitty_display(b"\x89PNG\r\n");
+        let s = kitty_display(b"\x89PNG\r\n", None);
         assert!(s.starts_with("\x1b_Gf=100,a=T,q=2"));
         assert!(s.ends_with("\x1b\\"));
     }
 
     #[test]
+    fn fitted_images_only_send_the_limiting_axis() {
+        let pixels = CellPixels::default();
+        let area = CellSize { cols: 80, rows: 15 };
+        for (width, height, rows, scale, kitty_size) in [
+            (608, 176, 11, None, ""),
+            (800, 200, 10, Some(ImageScale::Columns(80)), ",c=80"),
+            (320, 640, 15, Some(ImageScale::Rows(15)), ",r=15"),
+        ] {
+            let fit = pixels.fit(width, height, area);
+            assert_eq!(fit.rows, rows);
+            assert_eq!(fit.scale, scale);
+            let display = kitty_display(b"png", fit.scale);
+            assert!(display.starts_with(&format!("\x1b_Gf=100,a=T,q=2,m=0{kitty_size};")));
+        }
+    }
+
+    #[test]
     fn place_produces_cursor_move_then_a_eq_p() {
         let mut buf = Vec::new();
-        place(&mut buf, 7, 3, 5).unwrap();
+        place(&mut buf, 7, 3, 5, None).unwrap();
         let s = String::from_utf8(buf).unwrap();
         // Cursor move is 1-indexed (row+1, col+1), then place by image and
         // placement id with C=1 so kitty doesn't advance the cursor.

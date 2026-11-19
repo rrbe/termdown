@@ -27,10 +27,12 @@ base64 = "0.22"
 crossterm = "0.28"
 font-kit = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 notify = "8"
 pulldown-cmark = "0.13"
 ratatui = "0.29"
 rayon = "1"
+resvg = { version = "0.47", default-features = false, features = ["text", "system-fonts"] }
 serde = { version = "1", features = ["derive"] }
 terminal_size = "0.4"
 toml = "0.8"
