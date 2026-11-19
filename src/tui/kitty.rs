@@ -12,7 +12,7 @@ use crate::render;
 pub struct Placement {
     pub col: u16,
     pub row: u16,
-    pub size: Option<render::CellSize>,
+    pub scale: Option<render::ImageScale>,
 }
 
 #[derive(Default)]
@@ -57,7 +57,7 @@ impl ImageLifecycle {
         // 2. Place new ids, or re-place moved ids.
         for (&id, &placement) in desired {
             if self.placed.get(&id) != Some(&placement) {
-                render::place(w, id, placement.col, placement.row, placement.size)?;
+                render::place(w, id, placement.col, placement.row, placement.scale)?;
                 self.placed.insert(id, placement);
             }
         }
@@ -128,7 +128,7 @@ mod tests {
             Placement {
                 col: 5,
                 row: 10,
-                size: None,
+                scale: None,
             },
         );
         lc.sync(&mut buf, &desired).unwrap();
@@ -176,7 +176,7 @@ mod tests {
             Placement {
                 col: 0,
                 row: 0,
-                size: None,
+                scale: None,
             },
         );
         lc.sync(&mut buf, &desired).unwrap();

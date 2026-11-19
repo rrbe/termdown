@@ -1066,7 +1066,7 @@ fn center_on_logical(vp: &mut Viewport, doc: &layout::RenderedDoc, logical: usiz
     if let Some(vi) = vp.visual_line_for_logical(logical) {
         let mut offset = vp.height / 3;
         if let layout::LineKind::Mermaid { width, height, .. } = doc.lines[logical].kind {
-            let rows = vp.diagram_size(width, height).rows;
+            let rows = vp.diagram_fit(width, height).rows;
             offset = offset.min(vp.height.saturating_sub(rows));
         }
         let new_top = vi.saturating_sub(usize::from(offset));
@@ -1804,15 +1804,15 @@ fn desired_image_placements(app: &App) -> HashMap<u32, kitty::Placement> {
             layout::LineKind::Mermaid {
                 id, width, height, ..
             } => {
-                let size = active.viewport.diagram_size(width, height);
-                Some((id, size.rows, Some(size)))
+                let fit = active.viewport.diagram_fit(width, height);
+                Some((id, fit.rows, fit.scale))
             }
             _ => logical.spans.iter().find_map(|span| match span {
                 layout::Span::HeadingImage { id, rows } => Some((*id, *rows, None)),
                 _ => None,
             }),
         };
-        let Some((id, rows, size)) = image else {
+        let Some((id, rows, scale)) = image else {
             continue;
         };
         let end = vr.saturating_add(rows);
@@ -1825,7 +1825,7 @@ fn desired_image_placements(app: &App) -> HashMap<u32, kitty::Placement> {
             kitty::Placement {
                 col: col_offset,
                 row: vr,
-                size,
+                scale,
             },
         );
     }
@@ -1980,7 +1980,7 @@ mod renumber_tests {
             kitty::Placement {
                 col: 0,
                 row: 2,
-                size: None
+                scale: None
             }
         );
         assert_eq!(
@@ -1988,7 +1988,7 @@ mod renumber_tests {
             kitty::Placement {
                 col: 0,
                 row: 5,
-                size: None
+                scale: None
             }
         );
     }
@@ -2024,7 +2024,7 @@ mod renumber_tests {
             Config::default(),
             Theme::Dark,
         );
-        for (height, width, toc_open, cols) in [(20, 80, false, 50), (10, 50, true, 25)] {
+        for (height, width, toc_open) in [(20, 80, false), (10, 50, true)] {
             let active = app.active_mut();
             active.viewport.height = height;
             active.viewport.width = width;
@@ -2036,7 +2036,7 @@ mod renumber_tests {
                 kitty::Placement {
                     col: if toc_open { TOC_PANEL_WIDTH } else { 0 },
                     row: 0,
-                    size: Some(crate::render::CellSize { cols, rows: height }),
+                    scale: Some(crate::render::ImageScale::Rows(height)),
                 }
             );
         }

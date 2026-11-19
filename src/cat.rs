@@ -102,10 +102,10 @@ fn write_line<W: Write>(
                     cols: screen.cols,
                     rows: screen.rows.saturating_sub(1),
                 };
-                let size = CellPixels::query()
+                let fit = CellPixels::query()
                     .unwrap_or_default()
                     .fit(*width, *height, area);
-                let _ = writeln!(out, "{}", render::kitty_display(&img.png, Some(size)));
+                let _ = writeln!(out, "{}", render::kitty_display(&img.png, fit.scale));
             }
         }
         LineKind::BlockQuote { depth } => {

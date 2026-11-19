@@ -3,7 +3,7 @@
 //! Logical lines are split into width-aware visual lines for display.
 
 use crate::layout::{Line, LineKind, RenderedDoc, Span};
-use crate::render::{CellPixels, CellSize};
+use crate::render::{CellPixels, CellSize, ImageFit};
 
 /// Sentinel `logical_index` for VisualLines that don't map to any `doc.lines`
 /// entry — the metadata block's rows and its trailing blank. Using `usize::MAX`
@@ -71,7 +71,7 @@ impl Viewport {
         }
     }
 
-    pub fn diagram_size(&self, width: u32, height: u32) -> CellSize {
+    pub fn diagram_fit(&self, width: u32, height: u32) -> ImageFit {
         self.cell_pixels.fit(width, height, self.area())
     }
 
@@ -145,7 +145,7 @@ impl Viewport {
         let start = self
             .visual_line_for_logical(logical)
             .expect("diagram at viewport edge has a visual row");
-        let rows = usize::from(self.diagram_size(*width, *height).rows);
+        let rows = usize::from(self.diagram_fit(*width, *height).rows);
         let earliest_top = (start + rows).saturating_sub(usize::from(self.height));
 
         if delta > 0 && before < earliest_top && self.top > start {
@@ -283,7 +283,7 @@ fn wrap_all(lines: &[Line], viewport: &Viewport) -> Vec<VisualLine> {
         let image_rows = match line.kind {
             LineKind::Heading { .. } => Some(heading_row_count(line)),
             LineKind::Mermaid { width, height, .. } => {
-                Some(viewport.diagram_size(width, height).rows)
+                Some(viewport.diagram_fit(width, height).rows)
             }
             _ => None,
         };

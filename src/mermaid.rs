@@ -9,6 +9,9 @@ use crate::theme::Theme;
 
 const MAX_SOURCE_BYTES: usize = 32 * 1024;
 const MAX_IMAGE_SIDE: f32 = 2048.0;
+const DEFAULT_IMAGE_SCALE: f32 = 1.5;
+const FONT_FAMILY: &str =
+    "Menlo, Consolas, DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, monospace";
 
 static DIAGRAM_FONTS: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
 
@@ -23,10 +26,11 @@ pub fn render(source: &str, theme: Theme) -> Option<Diagram> {
     if source.len() > MAX_SOURCE_BYTES {
         return None;
     }
-    let theme = match theme {
+    let mut theme = match theme {
         Theme::Dark => DiagramTheme::dark(),
         Theme::Light => DiagramTheme::mermaid_default(),
     };
+    theme.font_family = FONT_FAMILY.to_owned();
     let svg = mermaid_rs_renderer::render_strict(
         source,
         RenderOptions {
@@ -93,7 +97,7 @@ fn rasterize_svg(svg: &str, options: &usvg::Options<'_>) -> Option<Diagram> {
         return None;
     }
     let size = tree.size();
-    let scale = (MAX_IMAGE_SIDE / size.width().max(size.height())).min(1.0);
+    let scale = (MAX_IMAGE_SIDE / size.width().max(size.height())).min(DEFAULT_IMAGE_SCALE);
     let width = (size.width() * scale).ceil() as u32;
     let height = (size.height() * scale).ceil() as u32;
     let mut image = tiny_skia::Pixmap::new(width, height)?;
