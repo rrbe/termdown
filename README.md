@@ -34,11 +34,30 @@ Installs into `~/.cargo/bin/`. Requires Rust 1.95+.
 
 ### Install script
 
+**macOS / Linux:**
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
-Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTALL_DIR`.
+Installs to `/usr/local/bin` by default. Set `TERMDOWN_INSTALL_DIR` to override it.
+
+**Windows (PowerShell):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.ps1 | iex"
+```
+
+The macOS/Linux command is a compatibility wrapper: it understands both the new
+cargo-dist archive layout and the legacy archive layout. The Windows installer
+is available on releases built with cargo-dist. **To update, just re-run the
+install command.**
+
+Or, with [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) (fetches the prebuilt binary, no compile):
+
+```sh
+cargo binstall termdown
+```
 
 <details>
 <summary>Manual download</summary>
@@ -47,12 +66,12 @@ Defaults to `/usr/local/bin`. Override the target directory with `TERMDOWN_INSTA
 TARGET=aarch64-apple-darwin
 BASE="https://github.com/rrbe/termdown/releases/latest/download"
 
-curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
-curl -LO "${BASE}/SHA256SUMS"
-grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz"
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz.sha256"
+shasum -a 256 -c "termdown-${TARGET}.tar.xz.sha256"
 
-tar xzf "termdown-${TARGET}.tar.gz"
-sudo mv termdown /usr/local/bin/
+tar xf "termdown-${TARGET}.tar.xz"
+sudo mv "termdown-${TARGET}/termdown" /usr/local/bin/
 ```
 
 </details>
@@ -65,19 +84,24 @@ cargo install --git https://github.com/rrbe/termdown
 
 ## Uninstall
 
+If you installed from crates.io:
+
+```sh
+cargo uninstall termdown
+```
+
+If you installed from the shell installer:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
 ```
 
-<details>
-<summary>Manual uninstall</summary>
+Manual cleanup:
 
 ```sh
 rm $(which termdown)
 rm -rf ~/.config/termdown
 ```
-
-</details>
 
 ## Usage
 

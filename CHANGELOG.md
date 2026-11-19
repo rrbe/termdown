@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Install & release use [cargo-dist](https://github.com/axodotdev/cargo-dist).**
+  Releases include a shell installer, a Windows PowerShell installer, and
+  [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)-compatible
+  archives. The same release tag triggers publishing to crates.io through a
+  separate workflow.
+- The repository `install.sh` supports both cargo-dist and legacy archives.
+  Re-run the install command to update.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added

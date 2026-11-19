@@ -1,0 +1,13 @@
+# Injected by dist into the build job (github-build-setup) before `dist build`.
+# termdown's font-kit pulls freetype-sys unconditionally on Linux; it links the
+# host libfreetype whenever pkg-config finds a freetype2.pc, but the runner
+# images ship that .pc without the matching libfreetype.so dev symlink, so the
+# link fails. Point pkg-config at an empty dir to hide the .pc: freetype-sys then
+# compiles its bundled copy statically — the same path `cargo install` takes on a
+# bare server. Mirrors the recipe in ci.yml.
+- name: Force bundled static freetype on Linux
+  if: runner.os == 'Linux'
+  shell: bash
+  run: |
+    mkdir -p "$RUNNER_TEMP/empty-pkgconfig"
+    echo "PKG_CONFIG_LIBDIR=$RUNNER_TEMP/empty-pkgconfig" >> "$GITHUB_ENV"

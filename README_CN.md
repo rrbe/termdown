@@ -34,11 +34,29 @@ cargo install termdown
 
 ### 脚本安装
 
+**macOS / Linux：**
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
 ```
 
 默认装到 `/usr/local/bin`。可以用 `TERMDOWN_INSTALL_DIR` 覆盖安装目录。
+
+**Windows（PowerShell）：**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/rrbe/termdown/releases/latest/download/termdown-installer.ps1 | iex"
+```
+
+macOS/Linux 命令是一个兼容包装脚本：同时支持新的 cargo-dist archive
+布局和旧 archive 布局。Windows installer 在使用 cargo-dist 构建的
+release 中可用。**更新时重跑安装命令即可。**
+
+或用 [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)（直接拉预编译二进制，免编译）：
+
+```sh
+cargo binstall termdown
+```
 
 <details>
 <summary>手动下载</summary>
@@ -47,12 +65,12 @@ curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | b
 TARGET=aarch64-apple-darwin
 BASE="https://github.com/rrbe/termdown/releases/latest/download"
 
-curl -LO "${BASE}/termdown-${TARGET}.tar.gz"
-curl -LO "${BASE}/SHA256SUMS"
-grep "termdown-${TARGET}.tar.gz" SHA256SUMS | shasum -a 256 -c -
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz"
+curl -LO "${BASE}/termdown-${TARGET}.tar.xz.sha256"
+shasum -a 256 -c "termdown-${TARGET}.tar.xz.sha256"
 
-tar xzf "termdown-${TARGET}.tar.gz"
-sudo mv termdown /usr/local/bin/
+tar xf "termdown-${TARGET}.tar.xz"
+sudo mv "termdown-${TARGET}/termdown" /usr/local/bin/
 ```
 
 </details>
@@ -65,19 +83,24 @@ cargo install --git https://github.com/rrbe/termdown
 
 ## 卸载
 
+如果是从 crates.io 安装：
+
+```sh
+cargo uninstall termdown
+```
+
+如果是通过 shell 安装脚本安装：
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/uninstall.sh | bash
 ```
 
-<details>
-<summary>手动卸载</summary>
+手动清理：
 
 ```sh
 rm $(which termdown)
 rm -rf ~/.config/termdown
 ```
-
-</details>
 
 ## 使用
 

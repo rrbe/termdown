@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
-# termdown installer
+# termdown installer compatibility wrapper.
 #
-# Downloads the prebuilt binary for your platform from GitHub Releases,
-# verifies its SHA-256 checksum, and installs it. Never invokes sudo; if the
-# install directory is not writable, prints a clear hint and exits.
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/rrbe/termdown/master/install.sh | bash
-#
-# Environment variables:
-#   TERMDOWN_INSTALL_DIR   install directory (default: /usr/local/bin)
+# New releases ship cargo-dist archives. Older releases only have the original
+# tar.gz archives plus SHA256SUMS. Keep this script in the repo so README can
+# point at a stable URL across the transition while preserving the existing
+# TERMDOWN_INSTALL_DIR behavior.
 
 set -euo pipefail
 
 REPO="rrbe/termdown"
-INSTALL_DIR="${TERMDOWN_INSTALL_DIR:-/usr/local/bin}"
 BASE="https://github.com/${REPO}/releases/latest/download"
 
 info() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
+
+INSTALL_DIR="${TERMDOWN_INSTALL_DIR:-/usr/local/bin}"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -29,7 +25,7 @@ case "$OS" in
   Linux)  OS_STR=unknown-linux-gnu ;;
   *)
     err "Unsupported OS: $OS (only macOS and Linux are supported by this script)."
-    err "For Windows, download the archive manually from https://github.com/${REPO}/releases."
+    err "For Windows, use cargo install or download an installer from https://github.com/${REPO}/releases."
     exit 1
     ;;
 esac
@@ -41,38 +37,50 @@ case "$ARCH" in
 esac
 
 TARGET="${ARCH_STR}-${OS_STR}"
-ARCHIVE="termdown-${TARGET}.tar.gz"
+DIST_ARCHIVE="termdown-${TARGET}.tar.xz"
+LEGACY_ARCHIVE="termdown-${TARGET}.tar.gz"
 
 info "Installing termdown (${TARGET})"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-info "Downloading ${ARCHIVE}"
-curl -fsSL -o "${TMP}/${ARCHIVE}"    "${BASE}/${ARCHIVE}"
-curl -fsSL -o "${TMP}/SHA256SUMS"    "${BASE}/SHA256SUMS"
-
-info "Verifying checksum"
 if command -v shasum >/dev/null 2>&1; then
-  CHECK_CMD="shasum -a 256 -c -"
+  CHECK_CMD=(shasum -a 256 -c)
 elif command -v sha256sum >/dev/null 2>&1; then
-  CHECK_CMD="sha256sum -c -"
+  CHECK_CMD=(sha256sum -c)
 else
   err "Neither 'shasum' nor 'sha256sum' is available; cannot verify the download."
   exit 1
 fi
-(cd "$TMP" && grep " ${ARCHIVE}\$" SHA256SUMS | $CHECK_CMD >/dev/null)
 
-info "Extracting"
-tar -xzf "${TMP}/${ARCHIVE}" -C "$TMP"
+info "Checking for ${DIST_ARCHIVE}"
+if curl --proto '=https' --tlsv1.2 -fsSL -o "${TMP}/${DIST_ARCHIVE}" "${BASE}/${DIST_ARCHIVE}" 2>/dev/null &&
+   curl --proto '=https' --tlsv1.2 -fsSL -o "${TMP}/${DIST_ARCHIVE}.sha256" "${BASE}/${DIST_ARCHIVE}.sha256" 2>/dev/null; then
+  info "Verifying checksum"
+  (cd "$TMP" && "${CHECK_CMD[@]}" "${DIST_ARCHIVE}.sha256" >/dev/null)
+  info "Extracting"
+  tar -xf "${TMP}/${DIST_ARCHIVE}" -C "$TMP"
+  BIN="${TMP}/termdown-${TARGET}/termdown"
+else
+  warn "latest release does not include cargo-dist archives yet; using legacy archive install"
+  info "Downloading ${LEGACY_ARCHIVE}"
+  curl -fsSL -o "${TMP}/${LEGACY_ARCHIVE}" "${BASE}/${LEGACY_ARCHIVE}"
+  curl -fsSL -o "${TMP}/SHA256SUMS" "${BASE}/SHA256SUMS"
+  info "Verifying checksum"
+  (cd "$TMP" && grep " ${LEGACY_ARCHIVE}\$" SHA256SUMS | "${CHECK_CMD[@]}" - >/dev/null)
+  info "Extracting"
+  tar -xzf "${TMP}/${LEGACY_ARCHIVE}" -C "$TMP"
+  BIN="${TMP}/termdown"
+fi
 
 mkdir -p "$INSTALL_DIR" 2>/dev/null || true
 DEST="${INSTALL_DIR%/}/termdown"
-if ! install -m 0755 "${TMP}/termdown" "$DEST" 2>/dev/null; then
+if ! install -m 0755 "$BIN" "$DEST" 2>/dev/null; then
   err "Cannot write to ${INSTALL_DIR} (permission denied)."
   cat >&2 <<EOF
 
-Hint — pick one:
+Hint - pick one:
 
   # Install globally with sudo
   curl -fsSL https://raw.githubusercontent.com/${REPO}/master/install.sh | sudo bash

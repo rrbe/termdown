@@ -54,4 +54,4 @@ When the feature/fix PRs that make up a release have all merged into `master`:
 6. `git checkout master && git pull` to land on the squashed bump commit.
 7. `git tag -a vX.Y.Z -m "termdown X.Y.Z"` on that commit and `git push origin vX.Y.Z`.
 
-Tags are **not** covered by the branch-protection rule (it guards `refs/heads/master` only), so the tag push in step 7 succeeds directly — this is the one push that doesn't go through a PR. The `release.yml` workflow triggers on `v*` tag pushes and produces the GitHub Release (cross-platform binaries + checksums) **and** publishes to crates.io (`cargo publish`). Pushing the tag is therefore the release trigger; the version stamp itself lands earlier via the bump PR.
+Branch protection applies to `refs/heads/master`. Push the version tag from step 7 directly to start the release workflows. `release.yml` publishes the GitHub Release archives, checksums, and installers. `publish-crate.yml` publishes to crates.io independently from the same tag.
