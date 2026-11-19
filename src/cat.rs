@@ -1,5 +1,5 @@
 //! Stream a `RenderedDoc` to stdout as ANSI text. Wrapping, quote prefixes,
-//! list indentation, and Kitty heading image emission all happen here.
+//! list indentation, and Kitty image emission all happen here.
 
 use std::io::{BufWriter, Write};
 
@@ -8,20 +8,20 @@ use crossterm::tty::IsTty;
 use crate::config::Config;
 use crate::frontmatter::{self, MetadataInfo};
 use crate::layout::{Color, Line, LineKind, RenderedDoc, Span, Style};
-use crate::render;
+use crate::render::{self, CellPixels, CellSize, DocumentImage};
 use crate::style::{
     display_width, Colors, BOLD_ON, DIM_ON, ITALIC_OFF, ITALIC_ON, RESET, STRIKETHROUGH_OFF,
     STRIKETHROUGH_ON, UNDERLINE_OFF, UNDERLINE_ON,
 };
 
-pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Config) {
+pub fn print(doc: &RenderedDoc, screen: CellSize, colors: &Colors, config: &Config) {
     let stdout = std::io::stdout();
     let display_images = stdout.is_tty();
     let mut out = BufWriter::new(stdout.lock());
 
     if config.metadata.unwrap_or(true) {
         if let Some(meta) = &doc.metadata {
-            write_metadata_oneline(&mut out, meta, term_width);
+            write_metadata_oneline(&mut out, meta, usize::from(screen.cols));
             let _ = writeln!(&mut out);
         }
     }
@@ -54,7 +54,7 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
             &doc.images,
             heading_text,
             display_images,
-            term_width,
+            screen,
             colors,
         );
         i += 1;
@@ -65,12 +65,13 @@ pub fn print(doc: &RenderedDoc, term_width: usize, colors: &Colors, config: &Con
 fn write_line<W: Write>(
     out: &mut W,
     line: &Line,
-    images: &[crate::render::HeadingImage],
+    images: &[DocumentImage],
     heading_text: Option<&str>,
     display_images: bool,
-    term_width: usize,
+    screen: CellSize,
     colors: &Colors,
 ) {
+    let term_width = usize::from(screen.cols);
     match &line.kind {
         LineKind::Blank => {
             let _ = writeln!(out);
@@ -83,7 +84,7 @@ fn write_line<W: Write>(
             if display_images {
                 if let Some(image_id) = id {
                     if let Some(img) = images.iter().find(|i| i.id == *image_id) {
-                        let _ = writeln!(out, "{}", render::kitty_display(&img.png));
+                        let _ = writeln!(out, "{}", render::kitty_display(&img.png, None));
                         return;
                     }
                 }
@@ -92,6 +93,18 @@ fn write_line<W: Write>(
                 .map(str::to_owned)
                 .unwrap_or_else(|| render_spans_plain(&line.spans));
             let _ = writeln!(out, "{BOLD_ON}{text}{RESET}");
+        }
+        LineKind::Mermaid { id, width, height } => {
+            if let Some(img) = images.iter().find(|img| img.id == *id) {
+                let area = CellSize {
+                    cols: screen.cols,
+                    rows: screen.rows.saturating_sub(1),
+                };
+                let size = CellPixels::query()
+                    .unwrap_or_default()
+                    .fit(*width, *height, area);
+                let _ = writeln!(out, "{}", render::kitty_display(&img.png, Some(size)));
+            }
         }
         LineKind::BlockQuote { depth } => {
             write_paragraph(out, &line.spans, *depth as usize, term_width, colors);

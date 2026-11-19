@@ -3,6 +3,7 @@ mod config;
 mod font;
 mod frontmatter;
 mod layout;
+mod mermaid;
 mod render;
 mod style;
 mod theme;
@@ -14,7 +15,7 @@ use std::io::{self, Read};
 use crate::config::ThemeChoice;
 
 use crossterm::tty::IsTty;
-use terminal_size::{terminal_size, Width};
+use terminal_size::{terminal_size, Height, Width};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -53,7 +54,11 @@ fn main() {
     let no_bell_flag = args.iter().any(|a| a == "--no-bell");
     let watch_flag = args.iter().any(|a| a == "--watch" || a == "-w");
 
-    check_terminal_support();
+    let graphics_supported = supports_kitty_graphics();
+    if !graphics_supported {
+        eprintln!("termdown: warning: terminal may not support Kitty graphics protocol");
+        eprintln!("termdown: headings require Ghostty, Kitty, WezTerm, or iTerm2");
+    }
 
     let mut config = config::load();
     if no_bell_flag {
@@ -115,7 +120,7 @@ fn main() {
     if want_tui {
         let path = file_arg.expect("want_tui implies a file path");
         let watch = config.watch.unwrap_or(false);
-        tui::run(&path, &config, theme, watch);
+        tui::run(&path, &config, theme, watch, graphics_supported);
         return;
     }
 
@@ -134,9 +139,8 @@ fn main() {
         }),
     };
 
-    let term_width = terminal_size()
-        .map(|(Width(w), _)| w as usize)
-        .unwrap_or(80);
+    let (Width(cols), Height(rows)) = terminal_size().unwrap_or((Width(80), Height(24)));
+    let screen = render::CellSize { cols, rows };
 
     let colors = crate::style::Colors::for_theme(theme);
 
@@ -148,8 +152,13 @@ fn main() {
     #[cfg(unix)]
     let saved_termios = is_iterm2().then(disable_echo);
 
-    let doc = layout::build(&md, &config, theme);
-    cat::print(&doc, term_width, &colors, &config);
+    let doc = layout::build(
+        &md,
+        &config,
+        theme,
+        graphics_supported && io::stdout().is_tty(),
+    );
+    cat::print(&doc, screen, &colors, &config);
 
     #[cfg(unix)]
     {
@@ -162,24 +171,19 @@ fn main() {
     }
 }
 
-fn check_terminal_support() {
+fn supports_kitty_graphics() -> bool {
     let term_program = std::env::var("TERM_PROGRAM")
         .unwrap_or_default()
         .to_lowercase();
     let term = std::env::var("TERM").unwrap_or_default().to_lowercase();
 
-    let likely_supported = term_program == "ghostty"
+    term_program == "ghostty"
         || term_program == "kitty"
         || term_program == "wezterm"
         || term_program == "iterm.app"
         || term.contains("kitty")
         || term.contains("ghostty")
-        || std::env::var("KITTY_WINDOW_ID").is_ok();
-
-    if !likely_supported {
-        eprintln!("termdown: warning: terminal may not support Kitty graphics protocol");
-        eprintln!("termdown: headings require Ghostty, Kitty, WezTerm, or iTerm2");
-    }
+        || std::env::var("KITTY_WINDOW_ID").is_ok()
 }
 
 // ─── UNIX Terminal State ────────────────────────────────────────────────────

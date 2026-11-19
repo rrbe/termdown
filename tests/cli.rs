@@ -211,6 +211,22 @@ fn stdin_rendering_works_without_terminal_warning_when_supported() {
 }
 
 #[test]
+fn piped_mermaid_output_keeps_source() {
+    let output = run_termdown(
+        &["--theme", "dark", "-"],
+        Some("```mermaid\nflowchart LR\nA[开始] --> B[结束]\n```\n"),
+        &[("TERM_PROGRAM", "ghostty")],
+        &[],
+    );
+    assert!(output.status.success());
+    let stdout = stdout_text(&output);
+    assert!(!stdout.contains("\x1b_G"));
+    let stdout = strip_ansi(&stdout);
+    assert!(stdout.contains("flowchart LR"));
+    assert!(stdout.contains("A[开始] --> B[结束]"));
+}
+
+#[test]
 fn file_input_renders_table_output() {
     let file = TempMarkdownFile::new("| A | B |\n| - | - |\n| x | long |\n");
     let output = run_termdown(

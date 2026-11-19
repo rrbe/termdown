@@ -2,7 +2,8 @@
 //!
 //! Logical lines are split into width-aware visual lines for display.
 
-use crate::layout::{Line, RenderedDoc, Span};
+use crate::layout::{Line, LineKind, RenderedDoc, Span};
+use crate::render::{CellPixels, CellSize};
 
 /// Sentinel `logical_index` for VisualLines that don't map to any `doc.lines`
 /// entry — the metadata block's rows and its trailing blank. Using `usize::MAX`
@@ -17,8 +18,7 @@ pub struct VisualLine {
     pub logical_index: usize,
     pub byte_start: usize,
     pub byte_end: usize,
-    /// True for the extra rows emitted below a heading's main line so the
-    /// heading image's cell footprint matches the viewport's row count.
+    /// True for the extra rows reserved for an image below its main line.
     /// These rows render as blank and do not carry image placements.
     pub is_spacer: bool,
     /// Set on rows that visualize the document's frontmatter metadata block.
@@ -43,8 +43,9 @@ pub struct Viewport {
     pub top: usize,
     pub height: u16,
     pub width: u16,
+    pub cell_pixels: CellPixels,
     visual_lines: Vec<VisualLine>,
-    cache_width: u16,
+    cached_area: Option<(CellSize, CellPixels)>,
     cache_metadata_expanded: bool,
     cache_metadata_shown: bool,
 }
@@ -55,18 +56,31 @@ impl Viewport {
             top: 0,
             height,
             width,
+            cell_pixels: CellPixels::default(),
             visual_lines: Vec::new(),
-            cache_width: 0,
+            cached_area: None,
             cache_metadata_expanded: false,
             cache_metadata_shown: false,
         }
     }
 
-    /// (Re)compute the wrap cache if width, metadata visibility, or fold state
-    /// have changed since the last call. `show_metadata` and `expanded` come
+    fn area(&self) -> CellSize {
+        CellSize {
+            cols: self.width,
+            rows: self.height,
+        }
+    }
+
+    pub fn diagram_size(&self, width: u32, height: u32) -> CellSize {
+        self.cell_pixels.fit(width, height, self.area())
+    }
+
+    /// (Re)compute the wrap cache if dimensions, metadata visibility, or fold
+    /// state have changed since the last call. `show_metadata` and `expanded` come
     /// from `Config.metadata` and `DocEntry.metadata_expanded` respectively.
     pub fn ensure_wrap(&mut self, doc: &RenderedDoc, show_metadata: bool, expanded: bool) {
-        if self.cache_width == self.width
+        let area = self.area();
+        if self.cached_area == Some((area, self.cell_pixels))
             && self.cache_metadata_expanded == expanded
             && self.cache_metadata_shown == show_metadata
             && !self.visual_lines.is_empty()
@@ -79,9 +93,9 @@ impl Viewport {
                 lines.extend(metadata_visual_lines(meta, expanded));
             }
         }
-        lines.extend(wrap_all(&doc.lines, self.width));
+        lines.extend(wrap_all(&doc.lines, self));
         self.visual_lines = lines;
-        self.cache_width = self.width;
+        self.cached_area = Some((area, self.cell_pixels));
         self.cache_metadata_expanded = expanded;
         self.cache_metadata_shown = show_metadata;
         if self.visual_lines.is_empty() {
@@ -98,7 +112,7 @@ impl Viewport {
     /// state outside `width` changes (e.g. metadata fold toggle).
     pub fn invalidate_wrap(&mut self) {
         self.visual_lines.clear();
-        self.cache_width = 0;
+        self.cached_area = None;
     }
 
     /// Move `top` by `delta` visual lines, clamped to [0, max_top].
@@ -225,22 +239,23 @@ fn metadata_visual_lines(
     out
 }
 
-fn wrap_all(lines: &[Line], width: u16) -> Vec<VisualLine> {
-    use crate::layout::LineKind;
+fn wrap_all(lines: &[Line], viewport: &Viewport) -> Vec<VisualLine> {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-    let max: usize = width as usize;
+    let max = usize::from(viewport.width);
 
     let mut out = Vec::with_capacity(lines.len());
     for (li, line) in lines.iter().enumerate() {
-        // Headings occupy N screen rows (N = image_rows for H1-H3 with images,
-        // 1 otherwise). Emit N VisualLines — a main one plus N-1 spacers — so
-        // the viewport's scroll math sees the same row count that draw() and
-        // desired_image_placements use. Without this, max_top undercounts and
-        // the last headings become unreachable + images overflow body area.
-        if let LineKind::Heading { .. } = line.kind {
+        // Reserve the same row count used by the graphics placements.
+        let image_rows = match line.kind {
+            LineKind::Heading { .. } => Some(heading_row_count(line)),
+            LineKind::Mermaid { width, height, .. } => {
+                Some(viewport.diagram_size(width, height).rows)
+            }
+            _ => None,
+        };
+        if let Some(rows) = image_rows {
             let end = line_byte_len(line);
-            let rows = heading_row_count(line);
             out.push(VisualLine {
                 logical_index: li,
                 byte_start: 0,
