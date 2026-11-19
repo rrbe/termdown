@@ -46,9 +46,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if command -v shasum >/dev/null 2>&1; then
-  CHECK_CMD="shasum -a 256 -c -"
+  CHECK_CMD=(shasum -a 256 -c)
 elif command -v sha256sum >/dev/null 2>&1; then
-  CHECK_CMD="sha256sum -c -"
+  CHECK_CMD=(sha256sum -c)
 else
   err "Neither 'shasum' nor 'sha256sum' is available; cannot verify the download."
   exit 1
@@ -58,7 +58,7 @@ info "Checking for ${DIST_ARCHIVE}"
 if curl --proto '=https' --tlsv1.2 -fsSL -o "${TMP}/${DIST_ARCHIVE}" "${BASE}/${DIST_ARCHIVE}" 2>/dev/null &&
    curl --proto '=https' --tlsv1.2 -fsSL -o "${TMP}/${DIST_ARCHIVE}.sha256" "${BASE}/${DIST_ARCHIVE}.sha256" 2>/dev/null; then
   info "Verifying checksum"
-  (cd "$TMP" && $CHECK_CMD "${DIST_ARCHIVE}.sha256" >/dev/null)
+  (cd "$TMP" && "${CHECK_CMD[@]}" "${DIST_ARCHIVE}.sha256" >/dev/null)
   info "Extracting"
   tar -xf "${TMP}/${DIST_ARCHIVE}" -C "$TMP"
   BIN="${TMP}/termdown-${TARGET}/termdown"
@@ -68,7 +68,7 @@ else
   curl -fsSL -o "${TMP}/${LEGACY_ARCHIVE}" "${BASE}/${LEGACY_ARCHIVE}"
   curl -fsSL -o "${TMP}/SHA256SUMS" "${BASE}/SHA256SUMS"
   info "Verifying checksum"
-  (cd "$TMP" && grep " ${LEGACY_ARCHIVE}\$" SHA256SUMS | $CHECK_CMD >/dev/null)
+  (cd "$TMP" && grep " ${LEGACY_ARCHIVE}\$" SHA256SUMS | "${CHECK_CMD[@]}" - >/dev/null)
   info "Extracting"
   tar -xzf "${TMP}/${LEGACY_ARCHIVE}" -C "$TMP"
   BIN="${TMP}/termdown"

@@ -5,10 +5,8 @@ use std::path::Path;
 
 use common::run_termdown;
 
-/// Replace each run of kitty image APC sequences (`ESC _ G ... ESC \`) with a
-/// single `<IMG>` marker. Font rasterization produces OS-specific PNG bytes
-/// that can't be compared across platforms — we only validate that an image
-/// was emitted at a given position, not its pixel content.
+/// Replace any Kitty image APC sequences (`ESC _ G ... ESC \`) with a stable
+/// marker so an accidental image in piped output produces a readable diff.
 fn strip_kitty_images(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());

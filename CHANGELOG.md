@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Install & release use [cargo-dist](https://github.com/axodotdev/cargo-dist).**
+  Releases include a shell installer, a Windows PowerShell installer, and
+  [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)-compatible
+  archives. The same release tag triggers publishing to crates.io through a
+  separate workflow.
+- The repository `install.sh` supports both cargo-dist and legacy archives.
+  Re-run the install command to update.
+
+## [0.7.0] - 2026-07-30
+
 ### Added
 - **Live reload (`--watch` / `-w`).** `termdown --watch FILE` watches the file
   and re-renders the TUI preview whenever it changes on disk — built for a
@@ -20,16 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(level, theme, text)`, so a live reload re-rasterizes only headings whose
   text actually changed — a body-only edit re-renders near-instantly.
 
-### Changed
-- **Install & release now use [`dist`](https://github.com/axodotdev/cargo-dist)
-  (cargo-dist).** Releases ship a one-line shell installer (macOS/Linux) and a
-  PowerShell installer (Windows), plus
-  [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall)-compatible
-  archives — updating is just re-running the install command. Publishing to
-  crates.io is unchanged (kept as a standalone workflow).
-- The repository `install.sh` is now a compatibility wrapper: it understands
-  both cargo-dist archives and the legacy archive layout, so the README install
-  command stays valid before and after the first cargo-dist release.
+### Fixed
+- **TUI headings remain visible while scrolling in iTerm2.** Heading placements
+  are now replaced in place, and off-screen placements no longer evict cached
+  image data.
+- **iTerm2 Kitty responses no longer leak into TUI input.** Protocol responses
+  are filtered before key dispatch, preventing them from triggering commands.
 
 ## [0.6.1] - 2026-06-08
 
@@ -59,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`[metadata · key=value, …]`); TUI shows the same line and can expand it
   to an inline key/value box with the new `m` key. A blank row follows the
   summary for visual separation. Opt out entirely via `metadata = false`
-  in `~/.config/termdown/config.toml`. See `docs/adr/0001-metadata-block-handling.md`.
+  in `~/.config/termdown/config.toml`.
 
 ### Changed
 - **Config location moved to the XDG path.** termdown now reads
@@ -162,6 +169,8 @@ First release published to [crates.io](https://crates.io/crates/termdown).
 Initial release: direct-output Markdown renderer with H1–H3 headings
 rasterized to PNG and painted via the Kitty graphics protocol.
 
+[0.7.0]: https://github.com/rrbe/termdown/releases/tag/v0.7.0
+[0.6.1]: https://github.com/rrbe/termdown/releases/tag/v0.6.1
 [0.6.0]: https://github.com/rrbe/termdown/releases/tag/v0.6.0
 [0.5.1]: https://github.com/rrbe/termdown/releases/tag/v0.5.1
 [0.5.0]: https://github.com/rrbe/termdown/releases/tag/v0.5.0

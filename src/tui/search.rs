@@ -1,9 +1,9 @@
 //! TUI search state — smart-case literal substring matching across
 //! `RenderedDoc.lines`. Regex support is deferred to v2.
 
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
-use crate::layout::{Line, RenderedDoc, Span};
+use crate::layout::{Line, LineKind, RenderedDoc, Span};
 
 #[derive(Debug, Clone)]
 pub struct MatchPos {
@@ -77,7 +77,10 @@ pub fn find_all(query: &str, doc: &RenderedDoc) -> Vec<MatchPos> {
     out
 }
 
-fn line_text(line: &Line) -> String {
+fn line_text(line: &Line) -> Cow<'_, str> {
+    if let LineKind::Mermaid { labels, .. } = &line.kind {
+        return Cow::Borrowed(labels);
+    }
     let mut s = String::new();
     for sp in &line.spans {
         match sp {
@@ -85,7 +88,7 @@ fn line_text(line: &Line) -> String {
             Span::HeadingImage { .. } => {}
         }
     }
-    s
+    Cow::Owned(s)
 }
 
 fn find_in_line(
@@ -182,6 +185,22 @@ mod tests {
     fn empty_query_returns_no_matches() {
         let doc = doc_with(&["anything"]);
         assert!(find_all("", &doc).is_empty());
+    }
+
+    #[test]
+    fn finds_visible_mermaid_label() {
+        let doc = crate::layout::build(
+            "```mermaid\nflowchart LR\nA[Ready & set] --> B[Done]\n```",
+            &crate::config::Config::default(),
+            crate::theme::Theme::Dark,
+            true,
+        );
+        let matches = find_all("ready & set", &doc);
+        assert_eq!(matches.len(), 1);
+        assert!(matches!(
+            doc.lines[matches[0].line_index].kind,
+            LineKind::Mermaid { .. }
+        ));
     }
 
     #[test]

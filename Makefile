@@ -15,7 +15,7 @@ help:
 	@echo "  coverage      - test coverage summary in the terminal (cargo-llvm-cov)"
 	@echo "  coverage-html - generate an HTML coverage report under target/llvm-cov/html"
 	@echo "  coverage-lcov - emit lcov.info for external tooling"
-	@echo "  large-fixture - (re)generate the gitignored stress fixture for manual perf runs (see docs/TESTING.md)"
+	@echo "  large-fixture - (re)generate the gitignored stress fixture for manual perf runs"
 
 fmt:
 	$(CARGO) fmt --all

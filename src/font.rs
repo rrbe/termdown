@@ -11,7 +11,7 @@ use font_kit::source::SystemSource;
 
 use crate::config::Config;
 
-const FALLBACK_FONT: &[u8] = include_bytes!("../fonts/SourceSerif4-SemiBold.ttf");
+pub(crate) const FALLBACK_FONT: &[u8] = include_bytes!("../fonts/SourceSerif4-SemiBold.ttf");
 
 // ─── Platform Default Fonts ─────────────────────────────────────────────────
 

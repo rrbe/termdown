@@ -26,6 +26,11 @@ fn run_termdown(
     command.env_remove("USERPROFILE");
     command.env_remove("XDG_CONFIG_HOME");
 
+    // Terminal capabilities are set by each test, independently of the runner.
+    for key in ["TERM", "TERM_PROGRAM", "KITTY_WINDOW_ID", "TMUX", "STY"] {
+        command.env_remove(key);
+    }
+
     if stdin.is_some() {
         command.stdin(Stdio::piped());
     }
@@ -208,6 +213,38 @@ fn stdin_rendering_works_without_terminal_warning_when_supported() {
     assert!(output.status.success());
     assert_eq!(stdout_text(&output), "hello\n");
     assert!(stderr_text(&output).trim().is_empty());
+}
+
+#[test]
+fn tmux_overrides_inherited_kitty_markers() {
+    let output = run_termdown(
+        &["-"],
+        Some("hello\n"),
+        &[
+            ("TERM", "tmux-256color"),
+            ("TERM_PROGRAM", "kitty"),
+            ("KITTY_WINDOW_ID", "1"),
+        ],
+        &[],
+    );
+    assert!(output.status.success());
+    assert!(stderr_text(&output).contains("terminal may not support Kitty graphics protocol"));
+}
+
+#[test]
+fn piped_mermaid_output_keeps_source() {
+    let output = run_termdown(
+        &["--theme", "dark", "-"],
+        Some("```mermaid\nflowchart LR\nA[开始] --> B[结束]\n```\n"),
+        &[("TERM_PROGRAM", "ghostty")],
+        &[],
+    );
+    assert!(output.status.success());
+    let stdout = stdout_text(&output);
+    assert!(!stdout.contains("\x1b_G"));
+    let stdout = strip_ansi(&stdout);
+    assert!(stdout.contains("flowchart LR"));
+    assert!(stdout.contains("A[开始] --> B[结束]"));
 }
 
 #[test]

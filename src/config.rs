@@ -24,7 +24,6 @@ pub struct Config {
     /// one-line summary in cat / TUI-folded, with the TUI `m` key to expand.
     /// `Some(false)` hides metadata entirely; parsing still runs so the block
     /// never leaks into body content.
-    /// See `docs/adr/0001-metadata-block-handling.md`.
     pub metadata: Option<bool>,
 
     /// Watch the file and live-reload the TUI preview when it changes on disk.

@@ -1,4 +1,4 @@
-//! TUI-side Kitty image lifecycle. Transmits each heading PNG to the
+//! TUI-side Kitty image lifecycle. Transmits each PNG to the
 //! terminal exactly once (cached by id), and on each frame diffs the
 //! desired placement map against the currently-placed state to emit only
 //! the minimum `place`/`delete_placement` commands.
@@ -8,12 +8,18 @@ use std::io::{self, Write};
 
 use crate::render;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub col: u16,
+    pub row: u16,
+    pub scale: Option<render::ImageScale>,
+}
+
 #[derive(Default)]
 pub struct ImageLifecycle {
     /// Ids that have been transmitted to the terminal (with cached data).
     transmitted: HashSet<u32>,
-    /// Current placements: id → (col, row).
-    placed: HashMap<u32, (u16, u16)>,
+    placed: HashMap<u32, Placement>,
 }
 
 impl ImageLifecycle {
@@ -29,13 +35,12 @@ impl ImageLifecycle {
 
     /// Diff `desired` against `placed`, emit delete/place commands to reconcile.
     ///
-    /// For ids whose position changed, Kitty treats a second `place` as
-    /// stacking a new placement rather than moving — so a `delete_placement`
-    /// is always required first when an id's (col, row) differs.
+    /// Each image uses its globally-unique id as its placement id, so placing
+    /// it again at a new position moves the existing placement.
     pub fn sync<W: Write>(
         &mut self,
         w: &mut W,
-        desired: &HashMap<u32, (u16, u16)>,
+        desired: &HashMap<u32, Placement>,
     ) -> io::Result<()> {
         // 1. Delete placements that are no longer desired (entirely off-screen).
         let to_remove: Vec<u32> = self
@@ -50,20 +55,10 @@ impl ImageLifecycle {
         }
 
         // 2. Place new ids, or re-place moved ids.
-        for (&id, &(col, row)) in desired {
-            match self.placed.get(&id) {
-                Some(&pos) if pos == (col, row) => {
-                    // unchanged
-                }
-                Some(_) => {
-                    render::delete_placement(w, id)?;
-                    render::place(w, id, col, row)?;
-                    self.placed.insert(id, (col, row));
-                }
-                None => {
-                    render::place(w, id, col, row)?;
-                    self.placed.insert(id, (col, row));
-                }
+        for (&id, &placement) in desired {
+            if self.placed.get(&id) != Some(&placement) {
+                render::place(w, id, placement.col, placement.row, placement.scale)?;
+                self.placed.insert(id, placement);
             }
         }
 
@@ -128,28 +123,31 @@ mod tests {
 
         // Enter at (5, 10).
         let mut desired = HashMap::new();
-        desired.insert(1u32, (5u16, 10u16));
+        desired.insert(
+            1,
+            Placement {
+                col: 5,
+                row: 10,
+                scale: None,
+            },
+        );
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf.clone()).unwrap();
-        // New format: CUP (1-indexed row+1=11, col+1=6) followed by a=p,i=1.
+        // CUP (1-indexed row+1=11, col+1=6) followed by image + placement ids.
         assert!(
-            s.contains("\x1b[11;6H") && s.contains("a=p,i=1"),
+            s.contains("\x1b[11;6H") && s.contains("a=p,i=1,p=1"),
             "expected initial place, got: {s:?}"
         );
         assert!(!s.contains("a=d,d=i,i=1"), "no delete expected: {s:?}");
 
-        // Move to (5, 8) — needs delete + place.
-        desired.insert(1, (5, 8));
+        // Move to (5, 8) — replacing the same placement id needs no delete.
+        desired.get_mut(&1).unwrap().row = 8;
         buf.clear();
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf.clone()).unwrap();
+        assert!(!s.contains("a=d,d=i,i=1"), "no delete expected: {s:?}");
         assert!(
-            s.contains("a=d,d=i,i=1"),
-            "expected delete before move: {s:?}"
-        );
-        // New format: CUP (1-indexed row+1=9, col+1=6) followed by a=p,i=1.
-        assert!(
-            s.contains("\x1b[9;6H") && s.contains("a=p,i=1"),
+            s.contains("\x1b[9;6H") && s.contains("a=p,i=1,p=1"),
             "expected re-place at new pos: {s:?}"
         );
 
@@ -163,7 +161,7 @@ mod tests {
         buf.clear();
         lc.sync(&mut buf, &desired).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("a=d,d=i,i=1"));
+        assert!(s.contains("a=d,d=i,i=1,p=1"));
         assert!(!s.contains("a=p,i=1"), "no place expected on leave: {s:?}");
     }
 
@@ -173,7 +171,14 @@ mod tests {
         let mut buf = Vec::new();
         lc.register(&mut buf, 1, b"png").unwrap();
         let mut desired = HashMap::new();
-        desired.insert(1u32, (0, 0));
+        desired.insert(
+            1,
+            Placement {
+                col: 0,
+                row: 0,
+                scale: None,
+            },
+        );
         lc.sync(&mut buf, &desired).unwrap();
         buf.clear();
 

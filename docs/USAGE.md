@@ -20,7 +20,9 @@ termdown [OPTIONS] [FILE]
 | `-V`, `--version` | Show version. |
 
 By default, passing a `FILE` opens it in the interactive TUI. Piped/redirected
-stdout, stdin input, or `--cat` all fall back to cat mode.
+stdout, stdin input, or `--cat` all fall back to cat mode. Piped or redirected
+output uses text headings instead of Kitty images so downstream programs retain
+the heading content.
 
 ### Examples
 

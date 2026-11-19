@@ -1,13 +1,5 @@
-- [ ] 测试 html 标签支持
-- [ ] 图片支持
-- [ ] 长文本换行时缩进的处理
-- [ ] 找出真实 MSRV 并下调 `rust-version`(当前 `1.95` 是跟本地对齐,触达面窄)
-  - 本地跑 `cargo install cargo-msrv && cargo msrv find`,二分出最低能编译的版本
-  - 同步更新 `Cargo.toml` 的 `rust-version` 和 `README.md` 里的 "Requires Rust X.Y+"
-  - 在 `.github/workflows/ci.yml` 加一个 `msrv` job(`cargo check --all-targets` on pinned toolchain),防止以后 PR 悄悄抬高 MSRV
-- [x] 测试 markdown metadata 支持
-- [ ] 检测文件变化
-- [x] 文件到顶、末尾时，播放声音提示，增加喇叭icon
-- [ ] t 开启目录时，支持左右等方向键在目录和内容之间切换，并可以有一些界面上的 focus 提示
-- [ ] 整理项目文档
-- [x] 整理测试用的 markdown 文件，现在太乱 
+- [ ] 完善 HTML 标签测试
+- [ ] 支持正文图片
+- [ ] 修复长文本换行后的缩进
+- [ ] 测定并在 CI 固定真实 MSRV
+- [ ] 支持目录与正文的键盘焦点切换

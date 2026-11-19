@@ -7,9 +7,9 @@ mod viewport;
 
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -21,6 +21,7 @@ use tui_textarea::TextArea;
 
 use crate::config::Config;
 use crate::layout;
+use crate::render::CellPixels;
 use crate::theme::Theme;
 use crate::tui::search::SearchState;
 
@@ -28,6 +29,9 @@ use viewport::Viewport;
 
 /// Width of the Table-of-Contents side panel when it is open.
 const TOC_PANEL_WIDTH: u16 = 30;
+const KITTY_PREFIX_TIMEOUT: Duration = Duration::from_millis(50);
+const KITTY_PAYLOAD_TIMEOUT: Duration = Duration::from_millis(250);
+const FOCUS_IMAGE_REFRESH_DELAY: Duration = Duration::from_millis(250);
 
 enum Mode {
     Normal,
@@ -39,6 +43,60 @@ enum Mode {
         links: Vec<(String, String)>, // (label_content, url)
     },
     Help,
+}
+
+enum KittyResponseState {
+    Idle,
+    Prefix(Instant),
+    Payload(Instant),
+}
+
+impl KittyResponseState {
+    /// iTerm2 ignores Kitty's `q=2` and writes `ESC_G...ESC\` responses to
+    /// stdin. Crossterm 0.28 exposes that APC as Alt+_, G, payload, Alt+\ key
+    /// events; consume the sequence before `G` reaches the jump-to-end binding.
+    fn consume(&mut self, event: &Event, now: Instant) -> bool {
+        let Event::Key(key) = event else {
+            return false;
+        };
+        let alt_char = |ch| {
+            key.code == event::KeyCode::Char(ch) && key.modifiers.contains(event::KeyModifiers::ALT)
+        };
+        let expired = match self {
+            Self::Prefix(started) => {
+                now.saturating_duration_since(*started) >= KITTY_PREFIX_TIMEOUT
+            }
+            Self::Payload(started) => {
+                now.saturating_duration_since(*started) >= KITTY_PAYLOAD_TIMEOUT
+            }
+            Self::Idle => false,
+        };
+        if expired {
+            *self = Self::Idle;
+        }
+
+        match self {
+            Self::Idle if alt_char('_') => {
+                *self = Self::Prefix(now);
+                true
+            }
+            Self::Prefix(_) if key.code == event::KeyCode::Char('G') => {
+                *self = Self::Payload(now);
+                true
+            }
+            Self::Prefix(_) => {
+                *self = Self::Idle;
+                false
+            }
+            Self::Payload(_) => {
+                if alt_char('\\') || key.code == event::KeyCode::Char('\\') {
+                    *self = Self::Idle;
+                }
+                true
+            }
+            Self::Idle => false,
+        }
+    }
 }
 
 /// A single loaded document with its own view state. `App` holds a stack of
@@ -77,6 +135,7 @@ struct App {
     /// row counts for heading images. 0 means unknown — callers fall back to
     /// conservative per-level estimates.
     cell_px_height: u32,
+    diagram_cell_pixels: CellPixels,
     /// Next `event_loop` iteration should force a full-screen clear and
     /// redraw (text + kitty placements). Set whenever state changes in a way
     /// that may leave stale terminal cells behind (scroll, toc toggle, doc
@@ -85,6 +144,7 @@ struct App {
     /// Whether live-reload watching is active for this session. Drives the
     /// status-bar indicator; the watcher itself lives in `run_ui`/`event_loop`.
     watch: bool,
+    kitty_response: Option<KittyResponseState>,
 }
 
 impl App {
@@ -109,8 +169,10 @@ impl App {
             config,
             theme,
             cell_px_height: 0,
+            diagram_cell_pixels: CellPixels::default(),
             needs_full_redraw: true,
             watch: false,
+            kitty_response: crate::is_iterm2().then_some(KittyResponseState::Idle),
         };
         app.push_new_doc(path, doc);
         app
@@ -125,8 +187,7 @@ impl App {
     }
 
     /// Append a new `DocEntry` and return its index. Re-numbers the doc's
-    /// image ids (and any `HeadingImage` / `LineKind::Heading { id }` refs
-    /// that point at them) from the global allocator so ids never collide
+    /// image ids and references from the global allocator so ids never collide
     /// across docs in a single session.
     fn push_new_doc(&mut self, path: String, mut doc: layout::RenderedDoc) -> usize {
         renumber_doc_images(&mut doc, &mut self.next_image_id);
@@ -152,17 +213,8 @@ impl App {
     /// (kitty drops re-registration of the same id silently; `ImageLifecycle`
     /// also tracks already-registered ids).
     fn register_active_images<W: Write>(&mut self, w: &mut W) -> io::Result<()> {
-        // Clone out the (id, png) pairs first to avoid aliasing &self.docs while
-        // we also want &mut self.images.
-        let doc_images: Vec<(u32, Vec<u8>)> = self
-            .active()
-            .doc
-            .images
-            .iter()
-            .map(|i| (i.id, i.png.clone()))
-            .collect();
-        for (id, png) in &doc_images {
-            self.images.register(w, *id, png)?;
+        for image in &self.docs[self.cursor].doc.images {
+            self.images.register(w, image.id, &image.png)?;
         }
         Ok(())
     }
@@ -179,7 +231,12 @@ impl App {
             if resolved.is_file() {
                 match std::fs::read_to_string(&resolved) {
                     Ok(src) => {
-                        let new_doc = layout::build(&src, &self.config, self.theme);
+                        let new_doc = layout::build(
+                            &src,
+                            &self.config,
+                            self.theme,
+                            crate::supports_kitty_graphics(),
+                        );
                         let new_path = resolved.display().to_string();
                         let new_cursor = self.push_new_doc(new_path, new_doc);
                         self.history.push(self.cursor);
@@ -203,8 +260,8 @@ impl App {
 }
 
 /// Renumber a freshly-built doc's image ids from the global allocator so they
-/// never collide with ids already loaded in the session, patching the
-/// `Span::HeadingImage` and `LineKind::Heading { id }` references to match.
+/// never collide with ids already loaded in the session, patching references
+/// to match.
 /// `layout::build` always assigns ids starting at 1; this shifts each so the
 /// first image becomes `*next_image_id`, then advances `*next_image_id` past
 /// the highest id assigned. Shared by initial/link loads (`push_new_doc`) and
@@ -228,10 +285,14 @@ fn renumber_doc_images(doc: &mut layout::RenderedDoc, next_image_id: &mut u32) {
                 }
             }
         }
-        if let layout::LineKind::Heading { id: Some(hid), .. } = &mut line.kind {
-            if let Some(&new) = id_map.get(hid) {
-                *hid = new;
+        match &mut line.kind {
+            layout::LineKind::Heading { id: Some(id), .. }
+            | layout::LineKind::Mermaid { id, .. } => {
+                if let Some(&new) = id_map.get(id) {
+                    *id = new;
+                }
             }
+            _ => {}
         }
     }
 }
@@ -367,7 +428,12 @@ fn reload_active_doc(app: &mut App) {
         Err(_) => return,
     };
 
-    let mut new_doc = layout::build(&source, &app.config, app.theme);
+    let mut new_doc = layout::build(
+        &source,
+        &app.config,
+        app.theme,
+        crate::supports_kitty_graphics(),
+    );
     refine_image_rows(&mut new_doc, app.cell_px_height);
     renumber_doc_images(&mut new_doc, &mut app.next_image_id);
 
@@ -412,7 +478,7 @@ fn reload_active_doc(app: &mut App) {
     app.needs_full_redraw = true;
 }
 
-pub fn run(path: &str, config: &Config, theme: Theme, watch: bool) {
+pub fn run(path: &str, config: &Config, theme: Theme, watch: bool, graphics_supported: bool) {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -420,7 +486,7 @@ pub fn run(path: &str, config: &Config, theme: Theme, watch: bool) {
             std::process::exit(1);
         }
     };
-    let doc = layout::build(&source, config, theme);
+    let doc = layout::build(&source, config, theme, graphics_supported);
 
     if let Err(e) = run_ui(doc, path.to_string(), config.clone(), theme, watch) {
         eprintln!("termdown: tui error: {e}");
@@ -437,7 +503,7 @@ fn run_ui(
 ) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    crossterm::execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let size = terminal.size()?;
@@ -449,6 +515,7 @@ fn run_ui(
     // doesn't report it, `cell_px_height` stays 0 and we keep per-level
     // fallbacks from layout.
     app.cell_px_height = query_cell_px_height();
+    app.diagram_cell_pixels = CellPixels::query().unwrap_or_default();
     if app.cell_px_height > 0 {
         // Refine the already-pushed initial doc now that we know the real
         // cell pixel height (push_new_doc ran with `cell_px_height = 0`).
@@ -456,7 +523,7 @@ fn run_ui(
         refine_image_rows(&mut app.docs[0].doc, h);
     }
 
-    // Transmit all heading PNGs once; subsequent frames only emit placement commands.
+    // Transmit the document PNGs so subsequent frames can place them.
     {
         let mut out = io::stdout().lock();
         app.register_active_images(&mut out)?;
@@ -487,7 +554,11 @@ fn run_ui(
     }
 
     disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        DisableFocusChange,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
 }
@@ -497,7 +568,13 @@ fn event_loop<B: Backend>(
     app: &mut App,
     mut live_watch: Option<LiveWatch>,
 ) -> io::Result<()> {
+    let mut focus_refresh_at = None;
     loop {
+        if focus_refresh_at.is_some_and(|deadline| Instant::now() >= deadline) {
+            app.needs_full_redraw = true;
+            focus_refresh_at = None;
+        }
+
         // Live reload: drain any pending file-change notifications, coalescing
         // the burst of events a single save produces into one reload. Checked
         // every iteration (not just when a key arrives) so a save with no
@@ -513,8 +590,7 @@ fn event_loop<B: Backend>(
         }
 
         // Sync viewport dimensions to the current terminal size. Handles
-        // initial startup and terminal resizes. Any change invalidates the
-        // wrap cache (`ensure_wrap` re-wraps when `self.width != cache_width`).
+        // initial startup and terminal resizes.
         let size = terminal.size()?;
         let body_height = size.height.saturating_sub(1);
         let body_width = if app.active().toc_open {
@@ -524,14 +600,12 @@ fn event_loop<B: Backend>(
         };
         app.term_size = (size.width, body_height);
         let show_metadata = app.config.metadata.unwrap_or(true);
+        let cell_pixels = app.diagram_cell_pixels;
         {
             let active = app.active_mut();
-            if active.viewport.width != body_width || active.viewport.height != body_height {
-                active.viewport.width = body_width;
-                active.viewport.height = body_height;
-                // width change implicitly invalidates wrap via ensure_wrap's
-                // cache_width comparison.
-            }
+            active.viewport.width = body_width;
+            active.viewport.height = body_height;
+            active.viewport.cell_pixels = cell_pixels;
             let expanded = active.metadata_expanded;
             active
                 .viewport
@@ -568,10 +642,25 @@ fn event_loop<B: Backend>(
 
         if event::poll(Duration::from_millis(50))? {
             let ev = event::read()?;
-            // Resize is the one event crossterm surfaces that must trigger a
-            // full redraw regardless of mode.
+            if app
+                .kitty_response
+                .as_mut()
+                .is_some_and(|state| state.consume(&ev, Instant::now()))
+            {
+                continue;
+            }
             if matches!(ev, Event::Resize(_, _)) {
+                app.diagram_cell_pixels = CellPixels::query().unwrap_or_default();
                 app.needs_full_redraw = true;
+                continue;
+            }
+            if let Some(delay) = focus_refresh_delay(&ev) {
+                // Some terminals can discard a redraw while restoring their graphics layer.
+                focus_refresh_at = Some(Instant::now() + delay);
+                continue;
+            }
+            if matches!(ev, Event::FocusLost) {
+                focus_refresh_at = None;
                 continue;
             }
             let cursor_before = app.cursor;
@@ -602,17 +691,41 @@ fn event_loop<B: Backend>(
     }
 }
 
+fn focus_refresh_delay(ev: &Event) -> Option<Duration> {
+    matches!(ev, Event::FocusGained).then_some(FOCUS_IMAGE_REFRESH_DELAY)
+}
+
+#[cfg(test)]
+mod redraw_event_tests {
+    use super::*;
+
+    #[test]
+    fn focus_gain_delays_image_refresh_until_the_tab_settles() {
+        assert_eq!(
+            focus_refresh_delay(&Event::FocusGained),
+            Some(FOCUS_IMAGE_REFRESH_DELAY)
+        );
+        assert_eq!(focus_refresh_delay(&Event::FocusLost), None);
+        assert_eq!(focus_refresh_delay(&Event::Resize(80, 24)), None);
+    }
+}
+
 /// Apply a scroll delta and ring the edge bell if the viewport didn't budge.
 /// Detection lives here (not in `Viewport`) so the data layer stays free of
 /// `App`/`Config`/audio coupling and `gg`/`G`/`]`/`[` — which bypass this
 /// helper — silently stay non-belling, matching the chosen scope.
-fn perform_scroll(app: &mut App, delta: i32) {
+fn perform_scroll(app: &mut App, delta: i32, page: bool) {
     if delta == 0 {
         return;
     }
-    let before = app.active().viewport.top;
-    app.active_mut().viewport.scroll_by(delta);
-    if app.active().viewport.top == before {
+    let active = app.active_mut();
+    let before = active.viewport.top;
+    if page {
+        active.viewport.scroll_page(&active.doc, delta);
+    } else {
+        active.viewport.scroll_by(delta);
+    }
+    if active.viewport.top == before {
         ring_bell(&app.config);
     }
 }
@@ -654,14 +767,14 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
             input::Action::Quit => {
                 app.should_quit = true;
             }
-            input::Action::ScrollLines(d) => perform_scroll(app, d),
+            input::Action::ScrollLines(d) => perform_scroll(app, d, false),
             input::Action::ScrollHalfPage(s) => {
                 let delta = (app.active().viewport.height as i32 / 2) * s;
-                perform_scroll(app, delta);
+                perform_scroll(app, delta, true);
             }
             input::Action::ScrollPage(s) => {
                 let delta = app.active().viewport.height as i32 * s;
-                perform_scroll(app, delta);
+                perform_scroll(app, delta, true);
             }
             input::Action::JumpStart => app.active_mut().viewport.top = 0,
             input::Action::JumpEnd => {
@@ -698,7 +811,7 @@ fn handle_normal_key(app: &mut App, ev: &Event) -> io::Result<()> {
                 // viewport.width is re-synced from terminal size at the top
                 // of every event_loop iteration, so we don't need to adjust
                 // it here — the next iteration picks up the new body width
-                // and `ensure_wrap` re-wraps once cache_width drifts. Width
+                // and `ensure_wrap` re-wraps for that width. Width
                 // change shifts every image's col offset, so force a full
                 // clear to avoid stale image pixels on the body side.
                 app.needs_full_redraw = true;
@@ -930,7 +1043,7 @@ fn apply_search_jump(app: &mut App, reverse: bool) {
     };
     state.current = Some(idx);
     let line = state.matches[idx].line_index;
-    center_on_logical(&mut active.viewport, line);
+    center_on_logical(&mut active.viewport, &active.doc, line);
 }
 
 fn advance_search(app: &mut App, delta: i32) {
@@ -946,13 +1059,17 @@ fn advance_search(app: &mut App, delta: i32) {
     let next = ((cur + delta) % len + len) % len;
     state.current = Some(next as usize);
     let line = state.matches[next as usize].line_index;
-    center_on_logical(&mut active.viewport, line);
+    center_on_logical(&mut active.viewport, &active.doc, line);
 }
 
-fn center_on_logical(vp: &mut Viewport, logical: usize) {
+fn center_on_logical(vp: &mut Viewport, doc: &layout::RenderedDoc, logical: usize) {
     if let Some(vi) = vp.visual_line_for_logical(logical) {
-        let third = (vp.height as usize) / 3;
-        let new_top = vi.saturating_sub(third);
+        let mut offset = vp.height / 3;
+        if let layout::LineKind::Mermaid { width, height, .. } = doc.lines[logical].kind {
+            let rows = vp.diagram_fit(width, height).rows;
+            offset = offset.min(vp.height.saturating_sub(rows));
+        }
+        let new_top = vi.saturating_sub(usize::from(offset));
         let max_top = vp.total_visual_lines().saturating_sub(vp.height as usize);
         vp.top = new_top.min(max_top);
     }
@@ -1099,7 +1216,7 @@ fn clipped_spans(
     let mut out: Vec<RSpan<'static>> = Vec::new();
     let mut cursor = 0usize;
 
-    // Highlight styles. Task 8/theme follow-up: pull from style::Colors instead.
+    // Search highlight styles are intentionally distinct from document colors.
     let current_style = RStyle::default().bg(RColor::Yellow).fg(RColor::Black);
     let other_style = RStyle::default()
         .bg(RColor::Rgb(80, 80, 0))
@@ -1221,7 +1338,7 @@ fn draw(frame: &mut ratatui::Frame, app: &App) {
             continue;
         }
 
-        // Heading spacer VisualLines reserve the rows below the main heading
+        // Image spacer VisualLines reserve the rows below the main image
         // line so the kitty image's cell footprint matches the viewport row
         // budget. Render as empty — the image paints over them. Checked before
         // indexing `doc.lines` so the metadata block's trailing blank (whose
@@ -1625,8 +1742,8 @@ fn query_cell_px_height() -> u32 {
     }
 }
 
-/// Refine image `rows` fields on every `HeadingImage` and every
-/// `Span::HeadingImage` in `doc` to match the real terminal cell pixel
+/// Refine image `rows` fields on every `Span::HeadingImage` in
+/// `doc` to match the real terminal cell pixel
 /// height. When `cell_px_height` is 0 (unknown), keeps the conservative
 /// estimate set by layout.
 fn refine_image_rows(doc: &mut layout::RenderedDoc, cell_px_height: u32) {
@@ -1635,9 +1752,8 @@ fn refine_image_rows(doc: &mut layout::RenderedDoc, cell_px_height: u32) {
     }
     // Build id → real_rows map from doc.images' pixel heights.
     let mut real_rows: HashMap<u32, u16> = HashMap::new();
-    for img in &mut doc.images {
+    for img in &doc.images {
         let r = img.px_height.div_ceil(cell_px_height).max(1) as u16;
-        img.rows = r;
         real_rows.insert(img.id, r);
     }
     // Propagate to each `Span::HeadingImage` so `draw()` and
@@ -1653,14 +1769,14 @@ fn refine_image_rows(doc: &mut layout::RenderedDoc, cell_px_height: u32) {
     }
 }
 
-fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
+fn desired_image_placements(app: &App) -> HashMap<u32, kitty::Placement> {
     let active = app.active();
-    // Heading images must start past the ToC panel when it is open.
+    // Images must start past the ToC panel when it is open.
     let col_offset: u16 = if active.toc_open { TOC_PANEL_WIDTH } else { 0 };
     // When the help popup is open, drop placements whose rows intersect the
     // popup rectangle. Kitty images live on a separate graphics layer, so
     // without this they would show through the popup; dropping them all
-    // (earlier behavior) also hid headings above/below the popup.
+    // (earlier behavior) also hid images above/below the popup.
     let popup_rows: Option<(u16, u16)> = if matches!(app.mode, Mode::Help) {
         let (full_w, body_h) = app.term_size;
         let popup = help_popup_rect(ratatui::layout::Rect {
@@ -1674,35 +1790,44 @@ fn desired_image_placements(app: &App) -> HashMap<u32, (u16, u16)> {
         None
     };
     let mut out = HashMap::new();
-    // wrap_all emits one VisualLine per screen row (headings expand into
+    // wrap_all emits one VisualLine per screen row (images expand into
     // N rows: main + spacers), so visual_row just increments by 1 each
     // iteration and matches the row count used by draw() + the viewport.
     let body_height = active.viewport.height;
     for (visual_row, vl) in active.viewport.visible().iter().enumerate() {
-        if vl.is_spacer || vl.byte_start != 0 {
+        if vl.logical_index == viewport::NO_LOGICAL || vl.is_spacer || vl.byte_start != 0 {
             continue;
         }
         let logical = &active.doc.lines[vl.logical_index];
         let vr = visual_row as u16;
-        for span in &logical.spans {
-            if let layout::Span::HeadingImage { id, rows } = span {
-                // Skip placement if the image's full row budget doesn't fit
-                // within the body area. Kitty paints images at natural
-                // pixel size, so a heading near the bottom would otherwise
-                // bleed into the status bar. The user can scroll another
-                // row or two to bring the whole heading on-screen.
-                if vr.saturating_add(*rows) > body_height {
-                    continue;
-                }
-                if let Some((py0, py1)) = popup_rows {
-                    let img_end = vr.saturating_add(*rows);
-                    if vr < py1 && img_end > py0 {
-                        continue;
-                    }
-                }
-                out.insert(*id, (col_offset, vr));
+        let image = match logical.kind {
+            layout::LineKind::Mermaid {
+                id, width, height, ..
+            } => {
+                let fit = active.viewport.diagram_fit(width, height);
+                Some((id, fit.rows, fit.scale))
             }
+            _ => logical.spans.iter().find_map(|span| match span {
+                layout::Span::HeadingImage { id, rows } => Some((*id, *rows, None)),
+                _ => None,
+            }),
+        };
+        let Some((id, rows, scale)) = image else {
+            continue;
+        };
+        let end = vr.saturating_add(rows);
+        // Keep images clear of the status bar and the help popup.
+        if end > body_height || popup_rows.is_some_and(|(top, bottom)| vr < bottom && end > top) {
+            continue;
         }
+        out.insert(
+            id,
+            kitty::Placement {
+                col: col_offset,
+                row: vr,
+                scale,
+            },
+        );
     }
     out
 }
@@ -1731,8 +1856,43 @@ mod open_link_tests {
 }
 
 #[cfg(test)]
+mod kitty_response_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(ch: char, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent::new(KeyCode::Char(ch), modifiers))
+    }
+
+    #[test]
+    fn consumes_iterm2_kitty_response_without_eating_real_keys() {
+        let mut state = KittyResponseState::Idle;
+        let now = Instant::now();
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT), now));
+        assert!(state.consume(&key('G', KeyModifiers::SHIFT), now));
+        for ch in "i=1,p=1;OK".chars() {
+            assert!(state.consume(&key(ch, KeyModifiers::NONE), now));
+        }
+        assert!(state.consume(&key('\\', KeyModifiers::ALT), now));
+        assert!(!state.consume(&key('G', KeyModifiers::SHIFT), now));
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT), now));
+        assert!(!state.consume(&key('j', KeyModifiers::NONE), now));
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT), now));
+        assert!(!state.consume(&key('G', KeyModifiers::SHIFT), now + KITTY_PREFIX_TIMEOUT));
+
+        assert!(state.consume(&key('_', KeyModifiers::ALT), now));
+        assert!(state.consume(&key('G', KeyModifiers::SHIFT), now));
+        assert!(!state.consume(&key('q', KeyModifiers::NONE), now + KITTY_PAYLOAD_TIMEOUT));
+    }
+}
+
+#[cfg(test)]
 mod renumber_tests {
     use super::*;
+    use crate::frontmatter::{MetadataInfo, MetadataKind};
     use crate::layout::{Line, LineKind, RenderedDoc, Span};
 
     fn heading_doc() -> RenderedDoc {
@@ -1749,20 +1909,14 @@ mod renumber_tests {
             lines: vec![line(1, 1), line(2, 2)],
             headings: vec![],
             images: vec![
-                crate::render::HeadingImage {
+                crate::render::DocumentImage {
                     id: 1,
                     png: vec![],
-                    cols: 0,
-                    rows: 3,
-                    px_width: 1,
                     px_height: 1,
                 },
-                crate::render::HeadingImage {
+                crate::render::DocumentImage {
                     id: 2,
                     png: vec![],
-                    cols: 0,
-                    rows: 3,
-                    px_width: 1,
                     px_height: 1,
                 },
             ],
@@ -1799,6 +1953,127 @@ mod renumber_tests {
         let mut next = 9;
         renumber_doc_images(&mut doc, &mut next);
         assert_eq!(next, 9);
+    }
+
+    #[test]
+    fn image_placements_ignore_metadata_rows() {
+        let mut doc = heading_doc();
+        doc.metadata = Some(MetadataInfo {
+            kind: MetadataKind::Yaml,
+            pairs: vec![("title".into(), "T".into())],
+            fallback_oneline: String::new(),
+        });
+        let mut app = App::new_with_initial_doc(
+            "fixture.md".into(),
+            doc,
+            10,
+            40,
+            Config::default(),
+            Theme::Dark,
+        );
+        let active = app.active_mut();
+        active.viewport.ensure_wrap(&active.doc, true, false);
+
+        let placements = desired_image_placements(&app);
+        assert_eq!(
+            placements[&1],
+            kitty::Placement {
+                col: 0,
+                row: 2,
+                scale: None
+            }
+        );
+        assert_eq!(
+            placements[&2],
+            kitty::Placement {
+                col: 0,
+                row: 5,
+                scale: None
+            }
+        );
+    }
+
+    fn diagram_doc() -> RenderedDoc {
+        RenderedDoc {
+            lines: vec![Line {
+                spans: vec![],
+                kind: LineKind::Mermaid {
+                    id: 1,
+                    width: 800,
+                    height: 640,
+                    labels: "Diagram label".into(),
+                },
+            }],
+            headings: vec![],
+            images: vec![crate::render::DocumentImage {
+                id: 1,
+                png: vec![],
+                px_height: 640,
+            }],
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn diagram_placement_fits_body_and_updates_after_resize() {
+        let mut app = App::new_with_initial_doc(
+            "diagram.md".into(),
+            diagram_doc(),
+            20,
+            80,
+            Config::default(),
+            Theme::Dark,
+        );
+        for (height, width, toc_open) in [(20, 80, false), (10, 50, true)] {
+            let active = app.active_mut();
+            active.viewport.height = height;
+            active.viewport.width = width;
+            active.toc_open = toc_open;
+            active.viewport.ensure_wrap(&active.doc, false, false);
+            assert_eq!(active.viewport.total_visual_lines(), usize::from(height));
+            assert_eq!(
+                desired_image_placements(&app)[&1],
+                kitty::Placement {
+                    col: if toc_open { TOC_PANEL_WIDTH } else { 0 },
+                    row: 0,
+                    scale: Some(crate::render::ImageScale::Rows(height)),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn paging_stops_on_a_full_height_diagram_in_both_directions() {
+        let mut doc = diagram_doc();
+        let diagram = doc.lines.pop().unwrap();
+        let body = Line {
+            spans: vec![],
+            kind: LineKind::Blank,
+        };
+        doc.lines.extend(std::iter::repeat_n(body.clone(), 7));
+        doc.lines.push(diagram);
+        doc.lines.extend(std::iter::repeat_n(body, 15));
+        let mut app = App::new_with_initial_doc(
+            "diagram.md".into(),
+            doc,
+            15,
+            80,
+            Config::default(),
+            Theme::Dark,
+        );
+        let active = app.active_mut();
+        active.viewport.ensure_wrap(&active.doc, false, false);
+
+        for (key, top, has_diagram) in [
+            (event::KeyCode::Char(' '), 7, true),
+            (event::KeyCode::Char(' '), 22, false),
+            (event::KeyCode::PageUp, 7, true),
+            (event::KeyCode::PageUp, 0, false),
+        ] {
+            handle_normal_key(&mut app, &Event::Key(event::KeyEvent::from(key))).unwrap();
+            assert_eq!(app.active().viewport.top, top);
+            assert_eq!(desired_image_placements(&app).contains_key(&1), has_diagram);
+        }
     }
 }
 
